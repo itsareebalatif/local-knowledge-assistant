@@ -1,4 +1,3 @@
-"""Document model — an ingested source file owned by a user."""
 
 from __future__ import annotations
 

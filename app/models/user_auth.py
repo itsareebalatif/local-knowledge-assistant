@@ -1,4 +1,3 @@
-"""UserAuth model — 1:1 credential/session record for a User."""
 
 from __future__ import annotations
 

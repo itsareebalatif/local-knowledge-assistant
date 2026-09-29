@@ -7,6 +7,49 @@ from __future__ import annotations
 import io
 
 import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+
+@pytest.fixture
+def db_session():
+    """A fresh, isolated in-memory SQLite DB per test, with FK enforcement
+    on (SQLite ignores foreign keys unless told otherwise, same as the real
+    engine in app/db/base.py). Importing app.models registers every table on
+    Base.metadata before create_all runs."""
+    from app.db.base import Base
+    from app import models  # noqa: F401 - registers tables on Base.metadata
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_fk(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+@pytest.fixture
+def user(db_session):
+    from app.models import User, UserAuth
+
+    u = User(email="mohsin@example.com", full_name="Mohsin", role="ADMIN")
+    db_session.add(u)
+    db_session.flush()
+    db_session.add(UserAuth(user_id=u.user_id, password_hash="hashed"))
+    db_session.commit()
+    return u
 
 
 @pytest.fixture

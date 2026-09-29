@@ -1,15 +1,3 @@
-"""Markdown parser.
-
-Parses raw Markdown structurally (ATX headings, fenced code blocks, pipe
-tables, blank-line-delimited paragraphs) via regex/line-scanning rather than
-rendering to HTML first — this keeps the heading hierarchy and block
-boundaries exact instead of guessing them back out of rendered markup, and
-avoids pulling in a full markdown-it/mistune dependency for a fairly
-mechanical grammar subset.
-
-Setext-style headings (`Title\\n=====`) are not handled; ATX (`#`..`######`)
-covers the overwhelming majority of real notes/docs.
-"""
 
 from __future__ import annotations
 

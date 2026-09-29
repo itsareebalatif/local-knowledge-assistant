@@ -1,9 +1,3 @@
-"""HTML parser (BeautifulSoup + lxml).
-
-Layout stripping: `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>`,
-`<aside>`, `<noscript>`, and comment nodes are removed before extraction, so
-navigation chrome and boilerplate never reach the chunker.
-"""
 
 from __future__ import annotations
 
@@ -38,10 +32,7 @@ class HtmlParser(BaseParser):
 
         blocks: list[Block] = []
         for tag in body.find_all(_BLOCK_TAGS):
-            # Skip elements nested inside a block we already captured
-            # (e.g. an <li> inside a <table>, or a heading inside a <li>) —
-            # find_all() walks the whole tree so nested matches would
-            # otherwise be emitted twice.
+           
             if tag.find_parent(_BLOCK_TAGS) is not None:
                 continue
 

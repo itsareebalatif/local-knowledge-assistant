@@ -1,21 +1,3 @@
-"""PDF parser: pdfplumber primary, pypdf fallback.
-
-PDFs have no semantic heading tags, so "header-aware" here means a font-size
-heuristic: pdfplumber gives per-character size/font info, which we group into
-lines and classify against the page's dominant (body) font size. A line
-noticeably larger than body text, or bold and short, is treated as a heading;
-its level is picked from a small number of relative-size buckets. This is an
-approximation — it does the right thing for the common case (a title page
-plus numbered section headings in a larger/bold font) and degrades to "no
-headings, just paragraphs" for PDFs that don't vary font size at all, which
-is still a correct (if flat) chunking result.
-
-If pdfplumber can't open the file (corrupt stream, unsupported filter,
-certain encrypted PDFs) we fall back to pypdf's plain `extract_text()`, which
-covers more malformed-but-not-encrypted files at the cost of no heading
-detection. If both fail, ParsingError propagates to the pipeline, which logs
-and skips the file (NFR-7) instead of crashing the batch.
-"""
 
 from __future__ import annotations
 
@@ -31,8 +13,8 @@ from app.ingestion.exceptions import ParsingError
 from app.ingestion.parsers.base import BaseParser
 from app.ingestion.types import Block, ParsedDocument
 
-_LINE_Y_TOLERANCE = 2.0  # px: chars within this vertical band are "the same line"
-_PARAGRAPH_GAP_FACTOR = 1.6  # a vertical gap bigger than this * line height starts a new paragraph
+_LINE_Y_TOLERANCE = 2.0  
+_PARAGRAPH_GAP_FACTOR = 1.6  
 
 
 @dataclass

@@ -1,10 +1,3 @@
-"""Shared data types passed between parsers, the cleaner, and the chunker.
-
-Keeping these as plain dataclasses (rather than the ORM models) is deliberate:
-the ingestion package has no idea a database exists. It turns raw file bytes
-into `ChunkDraft`s; the caller decides how to persist them (SHA-256 hashing /
-dedup and the actual `Chunk` row insert are a separate pipeline step).
-"""
 
 from __future__ import annotations
 
@@ -16,11 +9,6 @@ BlockType = Literal["heading", "paragraph", "table", "code"]
 
 @dataclass
 class Block:
-    """One structural unit of a parsed document, in document order.
-
-    `level` is only meaningful for headings: 1-6, mirroring H1-H6 / Markdown
-    `#`..`######` / DOCX "Heading N" styles / font-size-inferred PDF headings.
-    """
 
     type: BlockType
     text: str

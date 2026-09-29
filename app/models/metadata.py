@@ -1,4 +1,3 @@
-"""DocumentMetadata model — key/value attributes attached to a document."""
 
 from __future__ import annotations
 

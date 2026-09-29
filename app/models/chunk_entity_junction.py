@@ -1,4 +1,3 @@
-"""ChunkEntityJunction model — composite junction table mapping chunks <-> entities."""
 
 from __future__ import annotations
 

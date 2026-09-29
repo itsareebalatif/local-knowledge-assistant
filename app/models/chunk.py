@@ -1,4 +1,3 @@
-"""Chunk model — a text segment produced by chunking a document."""
 
 from __future__ import annotations
 

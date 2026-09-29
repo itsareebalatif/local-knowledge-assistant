@@ -1,4 +1,3 @@
-"""RelationEdge model — a directed edge between two entity nodes in the co-occurrence graph."""
 
 from __future__ import annotations
 

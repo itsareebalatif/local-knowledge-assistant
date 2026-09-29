@@ -25,7 +25,13 @@ pytest                          # run the test suite
 - [x] Day 1 — Multi-format async ingestion & header-aware chunking
       (`app/ingestion/` — parsers for PDF/MD/HTML/DOCX/TXT, layout stripping,
       512-token header-aware chunker; `pytest tests/test_ingestion.py`, 15 passing)
-- [ ] Day 1 — Dual SHA-256 deduplication
+- [x] Day 1 — Dual SHA-256 deduplication
+      (`app/hashing.py`, `app/services/ingest_service.py` — file-level gate vs
+      `Document.hash_checksum`, chunk-level gate vs `Chunk.chunk_hash`;
+      `pytest tests/test_dedup.py`, 6 passing)
 - [ ] Day 1 — Vector indexing & spaCy graph construction
 - [ ] Day 2 — Hybrid search, graph expansion, two-pipeline architecture
 - [ ] Day 3 — API, UI, benchmarking, deployment
+
+
+pytest -v tests/test_ingest_service.py

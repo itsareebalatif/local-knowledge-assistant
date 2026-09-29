@@ -1,12 +1,3 @@
-"""Header-aware semantic chunker (FR-1.3).
-
-Packs consecutive body blocks (paragraphs/tables/code) into chunks up to a
-strict token budget, without ever splitting a paragraph across two chunks
-unless that single paragraph alone exceeds the budget. Every chunk carries
-the heading breadcrumb it falls under (e.g. ["Introduction", "1.2 Scope"]) so
-retrieval can show — and later, the graph-expansion step can use — which
-section a chunk came from.
-"""
 
 from __future__ import annotations
 
@@ -16,9 +7,6 @@ from app.ingestion.tokenizer import count_tokens
 from app.ingestion.types import Block, ChunkDraft
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'\(])")
-
-# Headings deeper than this are still tracked in the breadcrumb but the
-# breadcrumb itself is capped so it doesn't dominate a chunk's token budget.
 _MAX_BREADCRUMB_DEPTH = 6
 
 
@@ -74,10 +62,7 @@ class HeaderAwareChunker:
         return chunks
 
     def _split_to_budget(self, text: str) -> list[str]:
-        """Yield `text` as-is if it fits the budget, else split by sentence,
-        then (only as a last resort) by a hard word-count cut — so a single
-        run-on block never produces a chunk over the strict token limit.
-        """
+
         if count_tokens(text) <= self.max_tokens:
             return [text]
 
@@ -93,9 +78,6 @@ class HeaderAwareChunker:
             if count_tokens(sentence) <= self.max_tokens:
                 current = sentence
             else:
-                # A single sentence alone blows the budget (rare: dense
-                # tables-as-text, unbroken code, no punctuation). Hard-wrap
-                # by words as the last resort — still never over budget.
                 pieces.extend(self._hard_wrap(sentence))
                 current = ""
         if current:

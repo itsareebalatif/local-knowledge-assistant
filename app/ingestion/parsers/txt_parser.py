@@ -1,6 +1,3 @@
-"""Plain-text parser. No heading structure — every blank-line-delimited
-paragraph is a body block at level 0."""
-
 from __future__ import annotations
 
 from app.ingestion.cleaning import normalize_text
