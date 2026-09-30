@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # --- Vector store ---
     vector_store_backend: str = "chroma"
     vector_store_path: str = str(BASE_DIR / "data" / "chroma")
+    vector_store_collection: str = "chunks"
 
     # --- Graph store ---
     graph_store_path: str = str(BASE_DIR / "data" / "graph.gpickle")
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     # --- Local LLM (Ollama) ---
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b"
+    ollama_timeout_seconds: float = 60.0
     embedding_model: str = "nomic-embed-text"
 
     # --- Optional cloud fallback (blank = fully local/offline) ---

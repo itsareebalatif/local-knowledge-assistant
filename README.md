@@ -29,7 +29,12 @@ pytest                          # run the test suite
       (`app/hashing.py`, `app/services/ingest_service.py` — file-level gate vs
       `Document.hash_checksum`, chunk-level gate vs `Chunk.chunk_hash`;
       `pytest tests/test_dedup.py`, 6 passing)
-- [ ] Day 1 — Vector indexing & spaCy graph construction
+- [x] Day 1 — Vector indexing & spaCy graph construction
+      (`app/embeddings/` — Ollama nomic-embed-text client + ChromaDB store;
+      `app/graph/` — spaCy entity extraction + NetworkX co-occurrence graph;
+      `app/services/embedding_service.py`, `graph_service.py`, `pipeline_service.py`
+      wire it to the dedup step; `pytest tests/test_embeddings.py tests/test_graph.py
+      tests/test_pipeline_service.py`, 21 passing)
 - [ ] Day 2 — Hybrid search, graph expansion, two-pipeline architecture
 - [ ] Day 3 — API, UI, benchmarking, deployment
 

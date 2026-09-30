@@ -19,6 +19,7 @@ def db_session():
     engine in app/db/base.py). Importing app.models registers every table on
     Base.metadata before create_all runs."""
     from app.db.base import Base
+    from app.db.fts import create_fts_index
     from app import models  # noqa: F401 - registers tables on Base.metadata
 
     engine = create_engine(
@@ -32,6 +33,7 @@ def db_session():
         cursor.close()
 
     Base.metadata.create_all(engine)
+    create_fts_index(engine)  # matches real init_db.py — chunks_fts always exists alongside the schema
     session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)()
     try:
         yield session
@@ -155,3 +157,40 @@ def sample_pdf_bytes() -> bytes:
 def oversized_paragraph_text() -> str:
     # ~900 words, no punctuation breaks -> forces the hard-wrap fallback path.
     return " ".join(f"word{i}" for i in range(900))
+
+
+class FakeEmbedder:
+    """Deterministic stand-in for OllamaEmbedder — no network, no Ollama
+    needed. Vector = [len(text), call_count] so tests can assert both
+    content and call counts precisely."""
+
+    def __init__(self):
+        self.calls: list[list[str]] = []
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [[float(len(t)), float(len(self.calls))] for t in texts]
+
+
+class FakeVectorStore:
+    """In-memory stand-in for ChromaVectorStore — same interface, no disk."""
+
+    def __init__(self):
+        self.records: dict[str, dict] = {}
+
+    def add(self, ids, embeddings, documents, metadatas):
+        for i, vec, doc, meta in zip(ids, embeddings, documents, metadatas):
+            self.records[i] = {"embedding": vec, "document": doc, "metadata": meta}
+
+    def query(self, embedding, top_k=5):
+        return list(self.records.values())[:top_k]
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def fake_vector_store() -> FakeVectorStore:
+    return FakeVectorStore()

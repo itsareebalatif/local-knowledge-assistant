@@ -87,7 +87,7 @@ async def test_chunk_level_dedup_reuses_existing_embedding(db_session, user):
 
     doc_b_chunks = db_session.execute(select(Chunk).where(Chunk.doc_id == second.document_id)).scalars().all()
     reused = next(c for c in doc_b_chunks if c.chunk_hash == shared_hash)
-    assert reused.embedding_id == "vecshared123"
+    assert reused.embedding_id == "vec-shared-123"
     assert reused.chunk_id not in second.pending_embedding_chunk_ids
 
     other_chunk = next(c for c in doc_b_chunks if c.chunk_hash != shared_hash)

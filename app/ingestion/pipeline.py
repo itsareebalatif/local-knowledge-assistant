@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app.config import get_settings
 from app.ingestion.chunker import HeaderAwareChunker
 from app.ingestion.exceptions import IngestionError, UnsupportedFileTypeError
 from app.ingestion.parsers import file_type_for_filename, get_parser
@@ -22,7 +23,10 @@ from app.ingestion.types import IngestResult
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_TOKENS = 512
+# Read once at import time from CHUNK_TOKEN_SIZE in .env (defaults to 512 —
+# see app/config.py). Every caller that doesn't pass max_tokens explicitly
+# gets this value, so changing .env changes chunk size app-wide.
+DEFAULT_MAX_TOKENS = get_settings().chunk_token_size
 
 
 async def ingest_bytes(file_bytes: bytes, filename: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> IngestResult:
