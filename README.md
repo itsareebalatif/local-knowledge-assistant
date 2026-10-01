@@ -35,7 +35,16 @@ pytest                          # run the test suite
       `app/services/embedding_service.py`, `graph_service.py`, `pipeline_service.py`
       wire it to the dedup step; `pytest tests/test_embeddings.py tests/test_graph.py
       tests/test_pipeline_service.py`, 21 passing)
-- [ ] Day 2 — Hybrid search, graph expansion, two-pipeline architecture
+- [x] Day 2 — Hybrid search, graph expansion, RRF fusion & grounding gate
+      (`app/db/fts.py` — SQLite FTS5 index + sync triggers for BM25;
+      `app/search/` — bm25_search, vector_search, rrf_fusion, grounding_gate;
+      `app/graph/graph_expansion.py` — 1-hop NetworkX neighbor traversal;
+      `app/services/retrieval_service.py` — Pipeline 1: runs all three
+      sources concurrently, fuses with RRF, halts before any LLM call if
+      context isn't sufficiently grounded; `pytest tests/test_fts.py
+      tests/test_bm25_search.py tests/test_vector_search.py
+      tests/test_graph_expansion.py tests/test_rrf_fusion.py
+      tests/test_grounding_gate.py tests/test_retrieval_service.py`, 32 passing)
 - [ ] Day 3 — API, UI, benchmarking, deployment
 
 

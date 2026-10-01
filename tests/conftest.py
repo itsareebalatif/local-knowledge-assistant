@@ -4,6 +4,7 @@ consume, so tests exercise real parsing rather than hand-rolled mocks."""
 
 from __future__ import annotations
 
+import hashlib
 import io
 
 import pytest
@@ -173,7 +174,12 @@ class FakeEmbedder:
 
 
 class FakeVectorStore:
-    """In-memory stand-in for ChromaVectorStore — same interface, no disk."""
+    """In-memory stand-in for ChromaVectorStore — same interface, no disk.
+
+    query() intentionally does no real similarity math (insertion order,
+    fake ascending distances) — it exists to test callers' plumbing against
+    the same result shape ChromaVectorStore.query() actually returns
+    (id/document/distance/metadata), not to test ranking quality."""
 
     def __init__(self):
         self.records: dict[str, dict] = {}
@@ -183,7 +189,30 @@ class FakeVectorStore:
             self.records[i] = {"embedding": vec, "document": doc, "metadata": meta}
 
     def query(self, embedding, top_k=5):
-        return list(self.records.values())[:top_k]
+        return [
+            {"id": vec_id, "document": rec["document"], "distance": float(rank), "metadata": rec["metadata"]}
+            for rank, (vec_id, rec) in enumerate(list(self.records.items())[:top_k])
+        ]
+
+
+class FakeLLM:
+    """Deterministic stand-in for OllamaLLM/GroqLLM — no network, no live
+    model server needed. Yields a fixed list of pieces and records every
+    (system_prompt, user_prompt) call for assertions."""
+
+    def __init__(self, pieces: list[str] | None = None):
+        self.pieces = pieces if pieces is not None else ["This ", "is ", "a ", "fake ", "answer."]
+        self.calls: list[tuple[str, str]] = []
+
+    async def generate_stream(self, system_prompt: str, user_prompt: str):
+        self.calls.append((system_prompt, user_prompt))
+        for piece in self.pieces:
+            yield piece
+
+
+@pytest.fixture
+def fake_llm() -> FakeLLM:
+    return FakeLLM()
 
 
 @pytest.fixture
@@ -194,3 +223,38 @@ def fake_embedder() -> FakeEmbedder:
 @pytest.fixture
 def fake_vector_store() -> FakeVectorStore:
     return FakeVectorStore()
+
+
+@pytest.fixture
+def make_chunk(db_session, user):
+    """Factory fixture: make_chunk("some text") -> a persisted Chunk, each
+    call under its own new Document so hash_checksum/chunk_hash uniqueness
+    constraints never collide across calls."""
+    from app.models import Chunk, Document
+
+    counter = {"n": 0}
+
+    def _make(content: str) -> Chunk:
+        counter["n"] += 1
+        n = counter["n"]
+        doc = Document(
+            user_id=user.user_id,
+            file_path=f"doc{n}.md",
+            file_name=f"doc{n}.md",
+            file_type="MD",
+            hash_checksum=hashlib.sha256(f"doc{n}".encode()).hexdigest(),
+        )
+        db_session.add(doc)
+        db_session.flush()
+        chunk = Chunk(
+            doc_id=doc.doc_id,
+            chunk_index=0,
+            chunk_hash=hashlib.sha256(f"chunk{n}".encode()).hexdigest(),
+            content=content,
+            token_count=len(content.split()),
+        )
+        db_session.add(chunk)
+        db_session.commit()
+        return chunk
+
+    return _make

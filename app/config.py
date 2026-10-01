@@ -47,9 +47,31 @@ class Settings(BaseSettings):
     # --- Optional cloud fallback (blank = fully local/offline) ---
     groq_api_key: str | None = None
     gemini_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "llama-3.1-8b-instant"
+    groq_timeout_seconds: float = 60.0
+
+    # --- Generation (Pipeline 2) ---
+    llm_backend: str = "local"  # "local" (Ollama) | "groq"
+    min_sentence_grounding_coverage: float = 0.3  # per-sentence keyword overlap floor, post-generation
 
     # --- Chunking ---
     chunk_token_size: int = 512
+
+    # --- Retrieval: per-source candidate counts (before fusion) ---
+    bm25_top_k: int = 5
+    vector_top_k: int = 5
+    graph_top_k: int = 5
+
+    # --- Retrieval: Reciprocal Rank Fusion ---
+    rrf_k: int = 60  # dampening constant from the original RRF paper
+    rrf_top_n: int = 10  # candidates kept after fusion, before the grounding gate
+
+    # --- Retrieval: Context Sufficiency / Grounding Gate ---
+    # Starting points, not yet tuned against real query/candidate data.
+    min_retrieval_score: float = 0.25
+    min_keyword_coverage: float = 0.4
+    min_grounding_candidates: int = 1
 
     @property
     def is_sqlite(self) -> bool:
