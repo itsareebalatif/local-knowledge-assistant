@@ -1,21 +1,3 @@
-"""Context Retrieval Verification & Grounding Gate (FR-4.5 Pipeline 1).
-
-Three independent, explainable checks run against the fused RRF candidate
-list, all before the LLM is ever invoked:
-
-  1. Minimum candidate count — is there anything to work with at all?
-  2. Score threshold — do enough candidates clear a minimum relevance bar?
-     Catches retrieval that "succeeded" mechanically but found nothing
-     actually relevant to the query.
-  3. Keyword coverage — do the query's own significant words actually show
-     up in what was retrieved? A chunk can be embedding-close to a query
-     while sharing almost no vocabulary with it — a common embedding false
-     positive this check catches independently of vector similarity.
-
-Any one of these failing halts the pipeline with a specific, logged reason —
-never a raised exception, and never silently proceeding to generation on
-weak grounding.
-"""
 
 from __future__ import annotations
 

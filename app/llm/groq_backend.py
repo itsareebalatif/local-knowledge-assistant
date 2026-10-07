@@ -66,3 +66,5 @@ class GroqLLM(LLMBackend):
                             yield piece
         except httpx.ConnectError as exc:
             raise LLMError(f"Could not reach Groq at {self.base_url}.") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"Groq did not respond within {self.timeout}s.") from exc

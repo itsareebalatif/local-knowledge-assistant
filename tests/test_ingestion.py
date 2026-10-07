@@ -111,8 +111,35 @@ def test_chunker_pops_sibling_headings_correctly():
         Block(type="paragraph", text="under A.2, sibling of A.1"),
     ]
     chunks = HeaderAwareChunker(max_tokens=512).chunk(blocks)
-    assert chunks[0].heading_path == ["A", "A.1"]
-    assert chunks[1].heading_path == ["A", "A.2"]
+    # "A" has no body content of its own (A.1 follows immediately) — it
+    # still gets its own chunk now rather than vanishing, see
+    # test_chunker_heading_with_no_body_still_produces_a_chunk.
+    assert chunks[0].heading_path == ["A"]
+    assert chunks[1].heading_path == ["A", "A.1"]
+    assert chunks[2].heading_path == ["A", "A.2"]
+
+
+def test_chunker_heading_with_no_body_still_produces_a_chunk():
+    # Regression test: a document that's entirely headings with no body
+    # paragraphs (an outline/agenda — "Day 1", "Day 2", "Day 3") used to
+    # produce zero chunks, silently. Every heading must survive as at least
+    # a heading-only chunk so it's actually findable by search.
+    blocks = [
+        Block(type="heading", text="Day 1 Agenda", level=1),
+        Block(type="heading", text="Day 2 Agenda", level=1),
+        Block(type="heading", text="Day 3 Agenda", level=1),
+    ]
+    chunks = HeaderAwareChunker(max_tokens=512).chunk(blocks)
+    assert len(chunks) == 3
+    assert [c.content for c in chunks] == ["Day 1 Agenda", "Day 2 Agenda", "Day 3 Agenda"]
+    assert [c.heading_path for c in chunks] == [["Day 1 Agenda"], ["Day 2 Agenda"], ["Day 3 Agenda"]]
+
+
+def test_chunker_prefixes_chunk_content_with_its_own_heading():
+    blocks = [Block(type="heading", text="Scope", level=1), Block(type="paragraph", text="Body text here.")]
+    chunks = HeaderAwareChunker(max_tokens=512).chunk(blocks)
+    assert len(chunks) == 1
+    assert chunks[0].content == "Scope\n\nBody text here."
 
 
 def test_chunker_hard_wraps_a_single_oversized_paragraph(oversized_paragraph_text):

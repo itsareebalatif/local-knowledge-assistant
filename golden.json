@@ -1,0 +1,51 @@
+[
+  {
+    "id": 1,
+    "question": "What is the primary scope and core functional purpose of the Personal Knowledge Engine (PKE)?",
+    "ground_truth": "The Personal Knowledge Engine is a secure, local AI assistant designed to organize and summarize user files, including PDFs, Markdown notes, web pages, DOCX files, and text documents[cite: 10]. It combines a Vector Database for standard semantic text searching and a Graph Database for tracking how concepts connect, allowing the system to deliver accurate answers with direct, interactive source citations pointing back to the original files[cite: 10]."
+  },
+  {
+    "id": 2,
+    "question": "Why does the PKE architecture use a lightweight graph-enriched hybrid RAG rather than full Microsoft-style GraphRAG?",
+    "ground_truth": "The architecture avoids full Microsoft-style GraphRAG because it does not require heavy LLM community re-summarization steps[cite: 11]. Instead, it uses fast non-LLM spaCy entity extraction and a lightweight NetworkX co-occurrence graph to expand context by 1 hop, optimizing execution speed and memory footprint for lightweight local models (such as qwen2.5:3b) running on standard hardware with 8 GB RAM while guaranteeing complete local privacy[cite: 11, 12]."
+  },
+  {
+    "id": 3,
+    "question": "How does the two-tier SHA-256 deduplication strategy work during file ingestion?",
+    "ground_truth": "Deduplication operates in two tiers: First, the Pre-Chunking tier computes a SHA-256 checksum of the raw file before parsing and checks it against the Document.hash_checksum column in SQLite; if a match exists, ingestion halts immediately to save CPU, embedding, and storage resources[cite: 13]. Second, the Post-Chunking tier calculates a SHA-256 checksum for each extracted chunk (Chunk.chunk_hash) and skips vector embedding generation if that chunk already exists in the system, preventing vector store bloat and redundant inference overhead[cite: 13]."
+  },
+  {
+    "id": 4,
+    "question": "What are the specific roles and tasks of Pipeline 1 and Pipeline 2 in the two-pipeline architecture for hallucination prevention?",
+    "ground_truth": "Pipeline 1 (Independent Retrieval Pipeline) deconstructs the user query, extracts query entities via spaCy, executes parallel BM25 keyword matching and dense vector retrieval in ChromaDB/FAISS, traverses 1-hop NetworkX graph neighbors, fuses results using Reciprocal Rank Fusion (RRF), and tests context sufficiency; if context is insufficient, it triggers a strict refusal without calling the LLM[cite: 14]. Pipeline 2 (Generation & Citation Pipeline) takes verified context, formats fact-bound prompts, runs LLM generation (via Ollama or Groq API), verifies factual grounding against context chunks using the Grounding Verifier, and attaches clickable source citations[cite: 14, 18]."
+  },
+  {
+    "id": 5,
+    "question": "What happens when the retrieval engine evaluates context sufficiency and finds that the context lacks sufficient grounding?",
+    "ground_truth": "Under requirement FR-4.5 and process P2.2, if the context sufficiency evaluation determines that the retrieved candidates lack sufficient factual support for the query, the system immediately halts execution and returns a strict refusal response to the user, completely preventing LLM invocation and eliminating speculative hallucination[cite: 14, 18]."
+  },
+  {
+    "id": 6,
+    "question": "Which models and technologies are specified for vector embeddings, vector storage, and entity extraction?",
+    "ground_truth": "The engine uses the nomic-embed-text model for creating dense vector embeddings, stores and indexes them locally using ChromaDB or FAISS, and uses fast spaCy NLP pipelines (without heavy LLM prompts) for entity extraction[cite: 11, 13]."
+  },
+  {
+    "id": 7,
+    "question": "What are the minimum hardware and software operating environment requirements for the PKE?",
+    "ground_truth": "The software environment requires Python 3.10 or newer running on macOS 12+, Linux (Ubuntu 20.04+), or Windows 10/11 via WSL2[cite: 12]. The minimum hardware requirement is an 8 GB RAM system with a 4-Core CPU, with 16 GB of RAM recommended when running local AI models[cite: 12]."
+  },
+  {
+    "id": 8,
+    "question": "How does the hybrid search engine enrich candidate text chunks beyond simple BM25 and vector search?",
+    "ground_truth": "After running parallel BM25 keyword matching and dense vector similarity search to obtain initial top-k candidates, the engine parses the user query to identify entities, traverses 1-hop neighbor entity nodes within the NetworkX co-occurrence graph, and retrieves the text chunks linked to those neighbor entities to expand and enrich the candidate set prior to fusion[cite: 12, 14]."
+  },
+  {
+    "id": 9,
+    "question": "What fields make up the UserAuth database table and what is its relationship to the User table?",
+    "ground_truth": "The UserAuth table contains auth_id (INTEGER Primary Key), user_id (INTEGER Foreign Key referencing User.user_id), password_hash (STRING for salted password hashes), refresh_token_hash (STRING for hashed session refresh tokens), and last_login_at (DATETIME of the latest authentication)[cite: 20]. It maintains a strict 1:1 relationship with the User table, meaning each User maps to exactly one UserAuth record[cite: 20, 22]."
+  },
+  {
+    "id": 10,
+    "question": "What attributes are stored in the Chunk table, and how does it map to entities?",
+    "ground_truth": "The Chunk table contains chunk_id (INTEGER Primary Key), doc_id (INTEGER Foreign Key referencing Document.doc_id), chunk_index (INTEGER sequential position), chunk_hash (STRING SHA-256 fingerprint), content (STRING plain text), token_count (INTEGER), and embedding_id (STRING referencing vector storage)[cite: 20, 21]. It maps to entity nodes via the chunk_entity_junction table, which consists of composite primary keys chunk_id and entity_id[cite: 21]."
+  }]

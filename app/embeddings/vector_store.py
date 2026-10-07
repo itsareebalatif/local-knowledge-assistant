@@ -29,7 +29,7 @@ class VectorStore(ABC):
     ) -> None: ...
 
     @abstractmethod
-    def query(self, embedding: list[float], top_k: int = 5) -> list[dict]: ...
+    def query(self, embedding: list[float], top_k: int = 5, where: dict | None = None) -> list[dict]: ...
 
 
 class ChromaVectorStore(VectorStore):
@@ -55,8 +55,8 @@ class ChromaVectorStore(VectorStore):
             return
         self._collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
-    def query(self, embedding: list[float], top_k: int = 5) -> list[dict]:
-        result = self._collection.query(query_embeddings=[embedding], n_results=top_k)
+    def query(self, embedding: list[float], top_k: int = 5, where: dict | None = None) -> list[dict]:
+        result = self._collection.query(query_embeddings=[embedding], n_results=top_k, where=where)
         ids = result.get("ids", [[]])[0]
         documents = result.get("documents", [[]])[0]
         distances = result.get("distances", [[]])[0]

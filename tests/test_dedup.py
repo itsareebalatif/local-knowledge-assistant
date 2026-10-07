@@ -68,13 +68,18 @@ async def test_same_file_different_users_both_ingest(db_session, user, sample_ma
 
 async def test_chunk_level_dedup_reuses_existing_embedding(db_session, user):
     shared_paragraph = "This exact paragraph will appear in two different documents for the duplication test."
-    doc_a_bytes = f"# Doc A\n\n{shared_paragraph}\n\n## Unique To A\n\nOnly in document A.".encode()
-    doc_b_bytes = f"# Doc B\n\n{shared_paragraph}\n\n## Unique To B\n\nOnly in document B.".encode()
+    # The shared content lives under an identically-named heading in both
+    # documents — the chunker now prefixes every chunk with its own section
+    # heading (see app/ingestion/chunker.py), so for the two chunks to hash
+    # identically (and thus dedup), the heading text has to match too, not
+    # just the paragraph underneath it.
+    doc_a_bytes = f"# Doc A\n\n## Shared Section\n\n{shared_paragraph}\n\n## Unique To A\n\nOnly in document A.".encode()
+    doc_b_bytes = f"# Doc B\n\n## Shared Section\n\n{shared_paragraph}\n\n## Unique To B\n\nOnly in document B.".encode()
 
     first = await ingest_document(db_session, user.user_id, doc_a_bytes, "a.md")
     assert first.status == "ingested"
 
-    shared_hash = sha256_text(shared_paragraph)
+    shared_hash = sha256_text(f"Shared Section\n\n{shared_paragraph}")
     shared_chunk = db_session.execute(select(Chunk).where(Chunk.chunk_hash == shared_hash)).scalars().first()
     assert shared_chunk is not None
     shared_chunk.embedding_id = "vec-shared-123"

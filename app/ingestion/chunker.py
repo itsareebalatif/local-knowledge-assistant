@@ -49,6 +49,20 @@ class HeaderAwareChunker:
                 while heading_stack and heading_stack[-1][0] >= block.level:
                     heading_stack.pop()
                 heading_stack.append((block.level, block.text))
+
+                # Seed the new section with its own heading text. Without
+                # this, a heading followed by no paragraph/table/code block
+                # (an outline or agenda made entirely of headings — "Day 1",
+                # "Day 2", ...) never reaches flush() with anything in the
+                # buffer, so the whole section silently vanishes: zero
+                # chunks, zero warnings, looks like a successful ingest of
+                # nothing. Bonus effect: every chunk now starts with its own
+                # section heading, which helps BM25/keyword matching on
+                # queries that name the section directly.
+                heading_text = block.text.strip()
+                if heading_text:
+                    buffer_parts.append(heading_text)
+                    buffer_tokens += count_tokens(heading_text)
                 continue
 
             for piece in self._split_to_budget(block.text):

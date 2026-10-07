@@ -56,6 +56,29 @@ def user(db_session):
 
 
 @pytest.fixture
+def registered_user(db_session):
+    """A real, fully-registered user — goes through app.auth.auth_service
+    for real (real bcrypt hash, real session token), unlike the `user`
+    fixture's placeholder password_hash. Use this for anything that needs a
+    working Authorization header, not just a user_id to attach rows to.
+
+    Deliberately a different email than the `user` fixture: make_chunk
+    depends on `user`, so any test combining make_chunk with registered_user
+    pulls both fixtures into the same test — same email would collide on
+    registration."""
+    from app.auth.auth_service import register_user
+
+    return register_user(
+        db_session, email="registered@example.com", password="correct horse battery staple", full_name="Registered User"
+    )
+
+
+@pytest.fixture
+def auth_headers(registered_user) -> dict:
+    return {"Authorization": f"Bearer {registered_user.access_token}"}
+
+
+@pytest.fixture
 def sample_txt_bytes() -> bytes:
     text = (
         "This is the first paragraph of a plain text file. It has a couple "
@@ -161,14 +184,14 @@ def oversized_paragraph_text() -> str:
 
 
 class FakeEmbedder:
-    """Deterministic stand-in for OllamaEmbedder — no network, no Ollama
-    needed. Vector = [len(text), call_count] so tests can assert both
-    content and call counts precisely."""
+    """Deterministic stand-in for OllamaEmbedder/CohereEmbedder — no
+    network, no live server needed. Vector = [len(text), call_count] so
+    tests can assert both content and call counts precisely."""
 
     def __init__(self):
         self.calls: list[list[str]] = []
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]:
         self.calls.append(list(texts))
         return [[float(len(t)), float(len(self.calls))] for t in texts]
 
@@ -188,10 +211,13 @@ class FakeVectorStore:
         for i, vec, doc, meta in zip(ids, embeddings, documents, metadatas):
             self.records[i] = {"embedding": vec, "document": doc, "metadata": meta}
 
-    def query(self, embedding, top_k=5):
+    def query(self, embedding, top_k=5, where=None):
+        items = list(self.records.items())
+        if where:
+            items = [(vec_id, rec) for vec_id, rec in items if all(rec["metadata"].get(k) == v for k, v in where.items())]
         return [
             {"id": vec_id, "document": rec["document"], "distance": float(rank), "metadata": rec["metadata"]}
-            for rank, (vec_id, rec) in enumerate(list(self.records.items())[:top_k])
+            for rank, (vec_id, rec) in enumerate(items[:top_k])
         ]
 
 
@@ -208,6 +234,26 @@ class FakeLLM:
         self.calls.append((system_prompt, user_prompt))
         for piece in self.pieces:
             yield piece
+
+
+class FakeReranker:
+    """Deterministic stand-in for CrossEncoderReranker — no model download,
+    no torch, no real cross-encoder inference. Reverses candidate order
+    (distinct from a no-op) so tests can tell whether reranking actually
+    ran versus the pipeline just keeping RRF's original order, and records
+    every call for assertions."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, int]] = []  # (query, num_candidates_in)
+
+    def rerank(self, query: str, candidates: list, top_k: int) -> list:
+        self.calls.append((query, len(candidates)))
+        return list(reversed(candidates))[:top_k]
+
+
+@pytest.fixture
+def fake_reranker() -> FakeReranker:
+    return FakeReranker()
 
 
 @pytest.fixture
@@ -229,16 +275,19 @@ def fake_vector_store() -> FakeVectorStore:
 def make_chunk(db_session, user):
     """Factory fixture: make_chunk("some text") -> a persisted Chunk, each
     call under its own new Document so hash_checksum/chunk_hash uniqueness
-    constraints never collide across calls."""
+    constraints never collide across calls. Pass owner=<some User> to attach
+    it to a different user than the default `user` fixture — needed for
+    tests built around `registered_user`/`auth_headers` instead."""
     from app.models import Chunk, Document
 
     counter = {"n": 0}
 
-    def _make(content: str) -> Chunk:
+    def _make(content: str, owner=None) -> Chunk:
+        owner = owner or user
         counter["n"] += 1
         n = counter["n"]
         doc = Document(
-            user_id=user.user_id,
+            user_id=owner.user_id,
             file_path=f"doc{n}.md",
             file_name=f"doc{n}.md",
             file_type="MD",

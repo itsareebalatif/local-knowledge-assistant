@@ -41,9 +41,7 @@ class CooccurrenceGraphBuilder:
 
     @staticmethod
     def node_key(name: str, entity_type: str) -> str:
-        """Public accessor for the node key format — used by graph_expansion.py
-        to look up edge weights directly on self.graph without duplicating
-        the key format in two places."""
+        
         return _node_key(name, entity_type)
 
     def save(self, path: str | Path) -> None:

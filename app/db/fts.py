@@ -1,15 +1,3 @@
-"""FTS5 full-text index over Chunk.content, for BM25 keyword search (FR-3.3).
-
-This is a raw-SQL virtual table, not a SQLAlchemy model — FTS5 virtual
-tables don't map cleanly to the ORM, so it's created and queried with plain
-SQL instead.
-
-Uses SQLite's "external content table" pattern: `chunks_fts` stores no data
-of its own, it indexes `chunks.content` by rowid (`chunk_id`). Three triggers
-on `chunks` (AFTER INSERT/UPDATE/DELETE) keep the index in sync automatically
-at the database level — app/services/ingest_service.py never needs to know
-this index exists, and can't accidentally forget to update it.
-"""
 
 from __future__ import annotations
 

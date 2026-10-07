@@ -1,14 +1,26 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 import httpx
 
 from app.config import get_settings
 
 
 class EmbeddingError(Exception):
-    """Raised when Ollama can't be reached or returns something unusable —
-    e.g. the model hasn't been pulled yet (`ollama pull nomic-embed-text`)."""
+    """Raised when an embedding backend can't be reached or returns
+    something unusable — e.g. Ollama's model hasn't been pulled yet, or a
+    cloud backend's API key is missing."""
+
+
+class EmbedderBackend(Protocol):
+    """Shared interface both OllamaEmbedder and CohereEmbedder satisfy —
+    every caller (embedding_service.py, vector_search.py, cli.py, ...)
+    type-hints against this, never a specific provider, the same pattern
+    app.llm.base.LLMBackend already uses on the generation side."""
+
+    async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]: ...
 
 
 class OllamaEmbedder:
@@ -25,7 +37,11 @@ class OllamaEmbedder:
         self.timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
         self._transport = transport  # test hook; None uses a real network transport
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]:
+        # input_type is part of the shared embedder interface (Cohere's API
+        # needs it — see cohere_embedder.py) but Ollama/nomic-embed-text has
+        # no such concept, so it's accepted here purely for call-site
+        # symmetry and otherwise ignored.
         if not texts:
             return []
         try:

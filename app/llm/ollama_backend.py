@@ -59,3 +59,5 @@ class OllamaLLM(LLMBackend):
                             break
         except httpx.ConnectError as exc:
             raise LLMError(f"Could not reach Ollama at {self.base_url}. Is it running? (`ollama serve`)") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"Ollama did not respond within {self.timeout}s.") from exc

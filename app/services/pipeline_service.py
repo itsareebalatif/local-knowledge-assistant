@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.embeddings.embedder import OllamaEmbedder
+from app.embeddings.embedder import EmbedderBackend
 from app.embeddings.vector_store import VectorStore
 from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
@@ -20,7 +20,7 @@ async def ingest_index_and_graph(
     user_id: int,
     file_bytes: bytes,
     filename: str,
-    embedder: OllamaEmbedder,
+    embedder: EmbedderBackend,
     vector_store: VectorStore,
     graph_builder: CooccurrenceGraphBuilder,
     extractor: SpacyEntityExtractor,

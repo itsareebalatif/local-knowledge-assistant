@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Knowledge Engine</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Personal Knowledge Engine</h1>
+    <p class="muted">Local-first ingestion, hybrid retrieval, grounded answers.</p>
+    <div id="account-bar" class="account-bar" hidden>
+      <span id="account-email" class="muted"></span>
+      <button id="logout-btn" class="secondary">Log out</button>
+    </div>
+  </header>
+
+  <section class="panel" id="auth-panel">
+    <h2 id="auth-title">Log in</h2>
+    <form id="auth-form">
+      <input id="auth-full-name" type="text" placeholder="Full name" hidden autocomplete="name">
+      <input id="auth-email" type="email" placeholder="Email" required autocomplete="email">
+      <input id="auth-password" type="password" placeholder="Password" required autocomplete="current-password">
+      <button type="submit" id="auth-submit-btn">Log in</button>
+    </form>
+    <p id="auth-status" class="muted"></p>
+    <p>
+      <a href="#" id="auth-toggle-link">Need an account? Register instead.</a>
+    </p>
+  </section>
+
+  <main id="app-main" hidden>
+    <section class="panel" id="upload-panel">
+      <h2>Ingest documents</h2>
+      <div id="dropzone" class="dropzone">
+        <p>Drag &amp; drop files here, or click to choose</p>
+        <p class="muted">PDF, Markdown, HTML, DOCX, TXT</p>
+        <input id="file-input" type="file" multiple hidden>
+      </div>
+      <ul id="upload-list" class="upload-list"></ul>
+    </section>
+
+    <section class="panel" id="documents-panel">
+      <h2>Your documents</h2>
+      <p id="documents-summary" class="muted"></p>
+      <ul id="documents-list" class="upload-list"></ul>
+    </section>
+
+    <section class="panel" id="query-panel">
+      <h2>Ask a question</h2>
+      <div class="query-row">
+        <input id="question" type="text" placeholder="What does Ollama run models on?">
+        <button id="ask-btn">Ask</button>
+      </div>
+      <p id="query-status" class="muted"></p>
+      <div id="answer" class="answer-box"></div>
+      <div id="citations" class="citations"></div>
+      <div id="citation-detail" class="detail-panel" hidden></div>
+    </section>
+
+    <section class="panel" id="graph-panel">
+      <h2>Knowledge graph</h2>
+      <div class="graph-row">
+        <button id="refresh-graph-btn">Refresh</button>
+        <span class="muted">Click a node to see its connections</span>
+      </div>
+      <svg id="graph-svg"></svg>
+      <div id="graph-detail" class="detail-panel"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
