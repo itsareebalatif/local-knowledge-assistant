@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends
+from langfuse import propagate_attributes
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -35,6 +36,7 @@ from app.dependencies import (
     get_vector_store,
 )
 from app.models import User
+from app.observability import observe, update
 from app.services.generation_service import generate_answer_stream
 from app.services.retrieval_service import retrieve_and_verify
 
@@ -57,24 +59,28 @@ async def query(
     llm=Depends(get_llm),
     reranker=Depends(get_reranker),
 ) -> QueryResponse:
-    retrieval_outcome = await retrieve_and_verify(
-        db, embedder, vector_store, graph_builder, extractor, payload.query, current_user.user_id, reranker
-    )
+    with propagate_attributes(user_id=str(current_user.user_id), tags=["api-query"]):
+        with observe("rag-query", input={"query": payload.query}) as root:
+            retrieval_outcome = await retrieve_and_verify(
+                db, embedder, vector_store, graph_builder, extractor, payload.query, current_user.user_id, reranker
+            )
 
-    status = retrieval_outcome.status
-    reason = retrieval_outcome.reason
-    answer = ""
-    citations: list[dict] = []
-    grounding: dict | None = None
+            status = retrieval_outcome.status
+            reason = retrieval_outcome.reason
+            answer = ""
+            citations: list[dict] = []
+            grounding: dict | None = None
 
-    async for event in generate_answer_stream(db, llm, retrieval_outcome):
-        if event["type"] == "done":
-            answer = event["answer"]
-            citations = event["citations"]
-            grounding = event["grounding"]
-        elif event["type"] == "error":
-            status = "error"
-            reason = event["message"]
+            async for event in generate_answer_stream(db, llm, retrieval_outcome):
+                if event["type"] == "done":
+                    answer = event["answer"]
+                    citations = event["citations"]
+                    grounding = event["grounding"]
+                elif event["type"] == "error":
+                    status = "error"
+                    reason = event["message"]
+
+            update(root, output={"status": status, "answer": answer})
 
     return QueryResponse(status=status, reason=reason, answer=answer, citations=citations, grounding=grounding)
 
@@ -92,10 +98,16 @@ async def query_stream(
     reranker=Depends(get_reranker),
 ) -> StreamingResponse:
     async def event_stream():
-        retrieval_outcome = await retrieve_and_verify(
-            db, embedder, vector_store, graph_builder, extractor, payload.query, current_user.user_id, reranker
-        )
-        async for event in generate_answer_stream(db, llm, retrieval_outcome):
-            yield _sse_format(event)
+        with propagate_attributes(user_id=str(current_user.user_id), tags=["api-query-stream"]):
+            with observe("rag-query", input={"query": payload.query}) as root:
+                retrieval_outcome = await retrieve_and_verify(
+                    db, embedder, vector_store, graph_builder, extractor, payload.query, current_user.user_id, reranker
+                )
+                final_answer = ""
+                async for event in generate_answer_stream(db, llm, retrieval_outcome):
+                    if event["type"] == "done":
+                        final_answer = event["answer"]
+                    yield _sse_format(event)
+                update(root, output={"status": retrieval_outcome.status, "answer": final_answer})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

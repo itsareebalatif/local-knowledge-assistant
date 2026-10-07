@@ -28,6 +28,11 @@ class GroqLLM(LLMBackend):
         self.model = model or settings.groq_model
         self.timeout = timeout if timeout is not None else settings.groq_timeout_seconds
         self._transport = transport
+        # Set by generate_stream from the final SSE chunk's "usage" field —
+        # read by callers (app/services/generation_service.py) after the
+        # stream completes, since generate_stream itself only yields text
+        # pieces. None until a stream actually finishes once.
+        self.last_usage: dict[str, int] | None = None
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         if not self.api_key:
@@ -58,6 +63,12 @@ class GroqLLM(LLMBackend):
                         if payload_str == "[DONE]":
                             break
                         data = json.loads(payload_str)
+                        usage = data.get("usage")
+                        if usage:
+                            self.last_usage = {
+                                "input": usage.get("prompt_tokens", 0),
+                                "output": usage.get("completion_tokens", 0),
+                            }
                         choices = data.get("choices") or []
                         if not choices:
                             continue

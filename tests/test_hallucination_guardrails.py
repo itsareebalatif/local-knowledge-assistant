@@ -34,6 +34,7 @@ class HallucinatingLLM:
     def __init__(self, claim: str):
         self.claim = claim
         self.calls: list[tuple[str, str]] = []
+        self.model = "fake-hallucinating-llm"
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         self.calls.append((system_prompt, user_prompt))
@@ -48,6 +49,7 @@ class FaithfulLLM:
     def __init__(self, answer: str):
         self.answer = answer
         self.calls: list[tuple[str, str]] = []
+        self.model = "fake-faithful-llm"
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         self.calls.append((system_prompt, user_prompt))

@@ -24,6 +24,7 @@ from app.llm.base import LLMBackend, LLMError
 from app.llm.citations import build_citations
 from app.llm.grounding_verifier import verify_grounding
 from app.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.observability import observe, update
 from app.services.types import RetrievalOutcome
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ async def generate_answer_stream(
     db: Session, llm: LLMBackend, retrieval_outcome: RetrievalOutcome
 ) -> AsyncIterator[dict]:
     if retrieval_outcome.status != "grounded":
+        # Pipeline 1 already veto'd this one — no LLM call happens, so no
+        # generation observation either; one would misleadingly suggest a
+        # model was invoked when it never was.
         yield {"type": "refused", "reason": retrieval_outcome.reason, "metrics": retrieval_outcome.metrics}
         return
 
@@ -40,17 +44,38 @@ async def generate_answer_stream(
     user_prompt, _marker_by_chunk_id = build_user_prompt(retrieval_outcome.query, candidates)
 
     answer_parts: list[str] = []
-    try:
-        async for piece in llm.generate_stream(SYSTEM_PROMPT, user_prompt):
-            answer_parts.append(piece)
-            yield {"type": "token", "text": piece}
-    except LLMError as exc:
-        logger.warning("LLM generation failed for query %r: %s", retrieval_outcome.query, exc)
-        yield {"type": "error", "message": str(exc)}
-        return
+    with observe("llm-generate", as_type="generation", model=llm.model, input=user_prompt) as gen_obs:
+        try:
+            async for piece in llm.generate_stream(SYSTEM_PROMPT, user_prompt):
+                answer_parts.append(piece)
+                yield {"type": "token", "text": piece}
+        except LLMError as exc:
+            logger.warning("LLM generation failed for query %r: %s", retrieval_outcome.query, exc)
+            update(gen_obs, level="ERROR", status_message=str(exc))
+            yield {"type": "error", "message": str(exc)}
+            return
 
-    full_answer = "".join(answer_parts)
-    verification = verify_grounding(full_answer, candidates)
+        full_answer = "".join(answer_parts)
+        # Only Groq/Gemini currently populate this (parsed from the final
+        # SSE chunk's "usage" field) — None for Ollama, which update()
+        # silently drops rather than sending a misleading zero.
+        usage = getattr(llm, "last_usage", None)
+        update(gen_obs, output=full_answer, usage_details=usage)
+
+    with observe(
+        "grounding-verifier",
+        as_type="evaluator",
+        input={"answer": full_answer, "candidate_count": len(candidates)},
+    ) as obs:
+        verification = verify_grounding(full_answer, candidates)
+        update(
+            obs,
+            output={
+                "overall_coverage": verification.overall_coverage,
+                "unsupported_sentences": verification.unsupported_sentences,
+            },
+        )
+
     citations = build_citations(db, candidates)
 
     if verification.unsupported_sentences:

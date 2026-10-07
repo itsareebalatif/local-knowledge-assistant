@@ -32,6 +32,9 @@ class GeminiLLM(LLMBackend):
         self.model = model or settings.gemini_model
         self.timeout = timeout if timeout is not None else settings.gemini_timeout_seconds
         self._transport = transport
+        # Set by generate_stream from the final SSE chunk's "usage" field,
+        # if present — same convention as GroqLLM.last_usage.
+        self.last_usage: dict[str, int] | None = None
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         if not self.api_key:
@@ -62,6 +65,12 @@ class GeminiLLM(LLMBackend):
                         if payload_str == "[DONE]":
                             break
                         data = json.loads(payload_str)
+                        usage = data.get("usage")
+                        if usage:
+                            self.last_usage = {
+                                "input": usage.get("prompt_tokens", 0),
+                                "output": usage.get("completion_tokens", 0),
+                            }
                         choices = data.get("choices") or []
                         if not choices:
                             continue

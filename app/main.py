@@ -27,6 +27,7 @@ from app.embeddings.vector_store import ChromaVectorStore
 from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.llm import get_llm_backend
+from app.observability import get_langfuse
 from app.search.reranker import CrossEncoderReranker
 
 
@@ -43,8 +44,13 @@ async def lifespan(app: FastAPI):
     # other optional dependency in this app.
     app.state.reranker = CrossEncoderReranker() if settings.rerank_enabled else None
     yield
-    # Nothing to explicitly tear down: Chroma's PersistentClient and the
-    # in-memory graph hold no open connections that need closing.
+    # Nothing else to explicitly tear down: Chroma's PersistentClient and
+    # the in-memory graph hold no open connections that need closing. The
+    # Langfuse client (if tracing is enabled) does need a final flush so
+    # whatever's still buffered on shutdown actually gets sent.
+    langfuse = get_langfuse()
+    if langfuse is not None:
+        langfuse.shutdown()
 
 
 app = FastAPI(

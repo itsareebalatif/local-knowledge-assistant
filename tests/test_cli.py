@@ -219,6 +219,8 @@ async def test_query_prints_error_event_to_stderr(
     from app.llm.base import LLMError
 
     class FailingLLM:
+        model = "fake-failing-llm"
+
         async def generate_stream(self, system_prompt, user_prompt):
             if True:
                 raise LLMError("the model server is unreachable")

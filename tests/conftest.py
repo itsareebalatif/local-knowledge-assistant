@@ -13,6 +13,26 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 
+@pytest.fixture(autouse=True)
+def _disable_langfuse_tracing(monkeypatch):
+    """The real project .env can carry real Langfuse credentials (needed
+    for live tracing) — without this, get_langfuse() would build a real
+    client during `pytest` and every traced call site would try to send
+    actual network requests to cloud.langfuse.com. Forces tracing off for
+    every test by default, same isolation already applied to the Cohere/
+    Groq keys for the same reason. get_langfuse is lru_cache'd, so a stale
+    cached (real) client from an earlier call must be cleared too, not
+    just the settings it would be built from."""
+    from app.config import get_settings
+    from app.observability import langfuse_client
+
+    monkeypatch.setattr(get_settings(), "langfuse_secret_key", None, raising=False)
+    monkeypatch.setattr(get_settings(), "langfuse_public_key", None, raising=False)
+    langfuse_client.get_langfuse.cache_clear()
+    yield
+    langfuse_client.get_langfuse.cache_clear()
+
+
 @pytest.fixture
 def db_session():
     """A fresh, isolated in-memory SQLite DB per test, with FK enforcement
@@ -190,6 +210,7 @@ class FakeEmbedder:
 
     def __init__(self):
         self.calls: list[list[str]] = []
+        self.model = "fake-embedder"
 
     async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]:
         self.calls.append(list(texts))
@@ -229,6 +250,7 @@ class FakeLLM:
     def __init__(self, pieces: list[str] | None = None):
         self.pieces = pieces if pieces is not None else ["This ", "is ", "a ", "fake ", "answer."]
         self.calls: list[tuple[str, str]] = []
+        self.model = "fake-llm"
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         self.calls.append((system_prompt, user_prompt))

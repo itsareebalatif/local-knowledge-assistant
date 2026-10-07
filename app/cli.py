@@ -16,6 +16,8 @@ import argparse
 import asyncio
 import sys
 
+from langfuse import propagate_attributes
+
 from app.config import get_settings
 from app.db.base import SessionLocal
 from app.embeddings import get_embedder_backend
@@ -26,6 +28,7 @@ from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.ingestion.loader import load_local_file
 from app.llm import get_llm_backend
+from app.observability import get_langfuse, observe, update
 from app.search.reranker import CrossEncoderReranker
 from app.services.generation_service import generate_answer_stream
 from app.services.pipeline_service import ingest_index_and_graph
@@ -77,27 +80,41 @@ async def _cmd_query(args: argparse.Namespace) -> None:
         llm = get_llm_backend()
         reranker = CrossEncoderReranker() if settings.rerank_enabled else None
 
-        retrieval_outcome = await retrieve_and_verify(
-            db, embedder, vector_store, graph_builder, extractor, args.question, user_id, reranker
-        )
+        with propagate_attributes(user_id=str(user_id), tags=["cli-query"]), observe(
+            "rag-query", input={"query": args.question}
+        ) as root:
+            retrieval_outcome = await retrieve_and_verify(
+                db, embedder, vector_store, graph_builder, extractor, args.question, user_id, reranker
+            )
 
-        if retrieval_outcome.status != "grounded":
-            print(f"I don't have enough grounded information to answer that (reason: {retrieval_outcome.reason}).")
-            return
+            if retrieval_outcome.status != "grounded":
+                print(f"I don't have enough grounded information to answer that (reason: {retrieval_outcome.reason}).")
+                update(root, output={"status": retrieval_outcome.status})
+                return
 
-        async for event in generate_answer_stream(db, llm, retrieval_outcome):
-            if event["type"] == "token":
-                print(event["text"], end="", flush=True)  # real-time stdout token printing (SRS 5.1)
-            elif event["type"] == "error":
-                print(f"\n[error] {event['message']}", file=sys.stderr)
-            elif event["type"] == "done":
-                print()
-                if event["citations"]:
-                    print("\nSources:")
-                    for c in event["citations"]:
-                        print(f"  [{c['marker']}] {c['file_name']} — {c['snippet']}")
+            full_answer_parts: list[str] = []
+            async for event in generate_answer_stream(db, llm, retrieval_outcome):
+                if event["type"] == "token":
+                    print(event["text"], end="", flush=True)  # real-time stdout token printing (SRS 5.1)
+                    full_answer_parts.append(event["text"])
+                elif event["type"] == "error":
+                    print(f"\n[error] {event['message']}", file=sys.stderr)
+                elif event["type"] == "done":
+                    print()
+                    if event["citations"]:
+                        print("\nSources:")
+                        for c in event["citations"]:
+                            print(f"  [{c['marker']}] {c['file_name']} — {c['snippet']}")
+
+            update(root, output={"status": retrieval_outcome.status, "answer": "".join(full_answer_parts)})
     finally:
         db.close()
+        # Short-lived process: without an explicit flush, buffered
+        # observations can be lost when the interpreter exits before the
+        # SDK's background thread sends them.
+        langfuse = get_langfuse()
+        if langfuse is not None:
+            langfuse.flush()
 
 
 async def _cmd_evaluate(args: argparse.Namespace) -> None:

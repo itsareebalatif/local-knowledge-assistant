@@ -75,6 +75,27 @@ async def test_groq_streams_pieces_in_order():
     assert pieces == ["Hi ", "there."]
 
 
+def _groq_sse_handler_with_usage(request: httpx.Request) -> httpx.Response:
+    # Confirmed against a real Groq response: the final chunk (empty delta,
+    # finish_reason "stop") carries a top-level "usage" object even without
+    # requesting stream_options.include_usage.
+    body = (
+        'data: {"choices":[{"delta":{"content":"Hi."}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+        '"usage":{"prompt_tokens":78,"completion_tokens":208,"total_tokens":286}}\n\n'
+        "data: [DONE]\n\n"
+    )
+    return httpx.Response(200, text=body)
+
+
+async def test_groq_captures_token_usage_from_the_final_chunk():
+    transport = httpx.MockTransport(_groq_sse_handler_with_usage)
+    llm = GroqLLM(api_key="test-key", base_url="http://fake-groq", transport=transport)
+    assert llm.last_usage is None  # nothing parsed yet, before the stream has run
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert llm.last_usage == {"input": 78, "output": 208}
+
+
 async def test_groq_without_api_key_raises_immediately(monkeypatch):
     # Same reasoning as the Cohere equivalent: GroqLLM(api_key=None) falls
     # back to settings.groq_api_key, so this must force that setting blank

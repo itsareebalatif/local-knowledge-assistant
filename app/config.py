@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     min_keyword_coverage: float = 0.4
     min_grounding_candidates: int = 1
 
+    # --- Observability: Langfuse tracing (optional — leave blank to disable) ---
+    # Credentials are passed explicitly to the Langfuse client
+    # (app/observability/langfuse_client.py) rather than relying on the
+    # SDK's own environment-variable auto-detection: Settings reads .env
+    # directly into typed fields and never populates os.environ, so the
+    # SDK would otherwise find nothing regardless of import order.
+    langfuse_secret_key: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")

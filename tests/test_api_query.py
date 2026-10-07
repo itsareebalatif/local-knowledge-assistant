@@ -157,6 +157,8 @@ def test_query_non_streaming_reports_llm_failure_as_error_status(
     from app.llm.base import LLMError
 
     class FailingLLM:
+        model = "fake-failing-llm"
+
         async def generate_stream(self, system_prompt, user_prompt):
             if True:
                 raise LLMError("the model server is unreachable")
