@@ -30,8 +30,7 @@ async def test_hash_and_load_local_file_matches_separate_hash_and_read(tmp_path)
 async def test_hash_and_load_local_file_streams_across_multiple_chunks(tmp_path, monkeypatch):
     import app.ingestion.loader as loader_module
 
-    # Force a tiny stream chunk size so a normal-sized file exercises the
-    # while-loop's multi-read path, not just a single read() call.
+    # Tiny chunk size forces the multi-read path, not a single read() call.
     monkeypatch.setattr(loader_module, "_STREAM_CHUNK_SIZE", 16)
     path = tmp_path / "big.txt"
     content = b"x" * 1000

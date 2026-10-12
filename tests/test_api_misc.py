@@ -38,9 +38,6 @@ def test_get_chunk_404_for_missing_chunk(db_session, registered_user, auth_heade
 
 
 def test_get_chunk_404_for_another_users_chunk(db_session, make_chunk, user, registered_user, auth_headers):
-    # The real ownership check: a chunk owned by the `user` fixture must not
-    # come back for the `registered_user` fixture's token, even though the
-    # chunk_id itself is perfectly valid.
     other_chunk = make_chunk("Someone else's private notes.", owner=user)
     _override_db(db_session)
     try:
@@ -56,7 +53,7 @@ def test_get_chunk_requires_authentication(db_session, make_chunk):
     _override_db(db_session)
     try:
         client = TestClient(app)
-        response = client.get(f"/api/chunks/{chunk.chunk_id}")  # no Authorization header
+        response = client.get(f"/api/chunks/{chunk.chunk_id}")
         assert response.status_code == 401
     finally:
         app.dependency_overrides.clear()

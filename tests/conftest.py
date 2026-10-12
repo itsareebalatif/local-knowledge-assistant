@@ -1,7 +1,3 @@
-"""Sample-file generators used by the ingestion tests. Each returns raw bytes
-for a real file of that format, built with the same libraries the parsers
-consume, so tests exercise real parsing rather than hand-rolled mocks."""
-
 from __future__ import annotations
 
 import hashlib
@@ -15,14 +11,6 @@ from sqlalchemy.pool import StaticPool
 
 @pytest.fixture(autouse=True)
 def _disable_langfuse_tracing(monkeypatch):
-    """The real project .env can carry real Langfuse credentials (needed
-    for live tracing) — without this, get_langfuse() would build a real
-    client during `pytest` and every traced call site would try to send
-    actual network requests to cloud.langfuse.com. Forces tracing off for
-    every test by default, same isolation already applied to the Cohere/
-    Groq keys for the same reason. get_langfuse is lru_cache'd, so a stale
-    cached (real) client from an earlier call must be cleared too, not
-    just the settings it would be built from."""
     from app.config import get_settings
     from app.observability import langfuse_client
 
@@ -35,10 +23,6 @@ def _disable_langfuse_tracing(monkeypatch):
 
 @pytest.fixture
 def db_session():
-    """A fresh, isolated in-memory SQLite DB per test, with FK enforcement
-    on (SQLite ignores foreign keys unless told otherwise, same as the real
-    engine in app/db/base.py). Importing app.models registers every table on
-    Base.metadata before create_all runs."""
     from app.db.base import Base
     from app.db.fts import create_fts_index
     from app import models  # noqa: F401 - registers tables on Base.metadata
@@ -54,7 +38,7 @@ def db_session():
         cursor.close()
 
     Base.metadata.create_all(engine)
-    create_fts_index(engine)  # matches real init_db.py — chunks_fts always exists alongside the schema
+    create_fts_index(engine)
     session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)()
     try:
         yield session
@@ -77,15 +61,6 @@ def user(db_session):
 
 @pytest.fixture
 def registered_user(db_session):
-    """A real, fully-registered user — goes through app.auth.auth_service
-    for real (real bcrypt hash, real session token), unlike the `user`
-    fixture's placeholder password_hash. Use this for anything that needs a
-    working Authorization header, not just a user_id to attach rows to.
-
-    Deliberately a different email than the `user` fixture: make_chunk
-    depends on `user`, so any test combining make_chunk with registered_user
-    pulls both fixtures into the same test — same email would collide on
-    registration."""
     from app.auth.auth_service import register_user
 
     return register_user(
@@ -199,14 +174,12 @@ def sample_pdf_bytes() -> bytes:
 
 @pytest.fixture
 def oversized_paragraph_text() -> str:
-    # ~900 words, no punctuation breaks -> forces the hard-wrap fallback path.
+    # ~900 words with no punctuation, to force the hard-wrap fallback path.
     return " ".join(f"word{i}" for i in range(900))
 
 
 class FakeEmbedder:
-    """Deterministic stand-in for OllamaEmbedder/CohereEmbedder — no
-    network, no live server needed. Vector = [len(text), call_count] so
-    tests can assert both content and call counts precisely."""
+    _DIMS = 64
 
     def __init__(self):
         self.calls: list[list[str]] = []
@@ -214,17 +187,21 @@ class FakeEmbedder:
 
     async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]:
         self.calls.append(list(texts))
-        return [[float(len(t)), float(len(self.calls))] for t in texts]
+        return [self._vectorize(t) for t in texts]
+
+    @classmethod
+    def _vectorize(cls, text: str) -> list[float]:
+        vec = [0.0] * cls._DIMS
+        words = [w for w in text.lower().split() if w]
+        for word in words:
+            idx = int(hashlib.md5(word.encode()).hexdigest(), 16) % cls._DIMS
+            vec[idx] += 1.0
+        if not words:
+            vec[0] = 1.0  # avoid an all-zero vector for empty input
+        return vec
 
 
 class FakeVectorStore:
-    """In-memory stand-in for ChromaVectorStore — same interface, no disk.
-
-    query() intentionally does no real similarity math (insertion order,
-    fake ascending distances) — it exists to test callers' plumbing against
-    the same result shape ChromaVectorStore.query() actually returns
-    (id/document/distance/metadata), not to test ranking quality."""
-
     def __init__(self):
         self.records: dict[str, dict] = {}
 
@@ -241,12 +218,12 @@ class FakeVectorStore:
             for rank, (vec_id, rec) in enumerate(items[:top_k])
         ]
 
+    def delete(self, ids):
+        for vec_id in ids:
+            self.records.pop(vec_id, None)
+
 
 class FakeLLM:
-    """Deterministic stand-in for OllamaLLM/GroqLLM — no network, no live
-    model server needed. Yields a fixed list of pieces and records every
-    (system_prompt, user_prompt) call for assertions."""
-
     def __init__(self, pieces: list[str] | None = None):
         self.pieces = pieces if pieces is not None else ["This ", "is ", "a ", "fake ", "answer."]
         self.calls: list[tuple[str, str]] = []
@@ -259,12 +236,6 @@ class FakeLLM:
 
 
 class FakeReranker:
-    """Deterministic stand-in for CrossEncoderReranker — no model download,
-    no torch, no real cross-encoder inference. Reverses candidate order
-    (distinct from a no-op) so tests can tell whether reranking actually
-    ran versus the pipeline just keeping RRF's original order, and records
-    every call for assertions."""
-
     def __init__(self):
         self.calls: list[tuple[str, int]] = []  # (query, num_candidates_in)
 
@@ -288,6 +259,19 @@ def fake_embedder() -> FakeEmbedder:
     return FakeEmbedder()
 
 
+class FakeEmailSender:
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []  # (to, subject, html)
+
+    async def send(self, to: str, subject: str, html: str) -> None:
+        self.calls.append((to, subject, html))
+
+
+@pytest.fixture
+def fake_email_sender() -> FakeEmailSender:
+    return FakeEmailSender()
+
+
 @pytest.fixture
 def fake_vector_store() -> FakeVectorStore:
     return FakeVectorStore()
@@ -295,11 +279,6 @@ def fake_vector_store() -> FakeVectorStore:
 
 @pytest.fixture
 def make_chunk(db_session, user):
-    """Factory fixture: make_chunk("some text") -> a persisted Chunk, each
-    call under its own new Document so hash_checksum/chunk_hash uniqueness
-    constraints never collide across calls. Pass owner=<some User> to attach
-    it to a different user than the default `user` fixture — needed for
-    tests built around `registered_user`/`auth_headers` instead."""
     from app.models import Chunk, Document
 
     counter = {"n": 0}

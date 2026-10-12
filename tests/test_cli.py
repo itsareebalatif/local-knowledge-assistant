@@ -8,10 +8,6 @@ from app.models import User
 
 
 def _patch_common(monkeypatch, db_session, fake_embedder, fake_vector_store, graph_path):
-    """Point every CLI-internal singleton constructor at test doubles, and
-    SessionLocal at the test's in-memory db_session, so no CLI test ever
-    touches a real Ollama server, a real Chroma directory, or the project's
-    real sqlite file."""
     monkeypatch.setattr(cli, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(cli, "get_embedder_backend", lambda: fake_embedder)
     monkeypatch.setattr(cli, "ChromaVectorStore", lambda: fake_vector_store)
@@ -19,18 +15,10 @@ def _patch_common(monkeypatch, db_session, fake_embedder, fake_vector_store, gra
     settings = cli.get_settings()
     monkeypatch.setattr(settings, "graph_store_path", str(graph_path), raising=False)
 
-    # db.close() is called in each command's `finally` — harmless no-op here
-    # since the fixture's own teardown closes db_session; just stop it from
-    # closing early mid-test if a command calls it more than once.
     monkeypatch.setattr(db_session, "close", lambda: None)
 
 
 def _default_user(db_session) -> User:
-    """The CLI's own default-local-user, not the `user` fixture — these are
-    two different rows unless a test is careful to use this one. A chunk
-    made via make_chunk(..., owner=_default_user(db_session)) is the one a
-    CLI query/evaluate call (which also resolves this same user) can
-    actually see, now that retrieval is scoped per-user."""
     user_id = cli._get_or_create_default_user(db_session)
     return db_session.get(User, user_id)
 
@@ -60,12 +48,12 @@ async def test_ingest_reports_duplicate_without_reingesting(
     file_path.write_text("# Notes\n\nSome content here.\n")
 
     await cli._cmd_ingest(SimpleNamespace(path=str(file_path), user_id=None))
-    capsys.readouterr()  # discard first call's output
+    capsys.readouterr()
     await cli._cmd_ingest(SimpleNamespace(path=str(file_path), user_id=None))
 
     out = capsys.readouterr().out
     assert "Skipped notes.md: already ingested" in out
-    assert len(fake_embedder.calls) == 1  # second ingest never re-embedded
+    assert len(fake_embedder.calls) == 1
 
 
 async def test_query_prints_streamed_tokens_and_sources(
@@ -173,7 +161,7 @@ async def test_evaluate_context_precision_uses_eval_llm_backend_override_when_se
 
     await cli._cmd_evaluate_context_precision(SimpleNamespace(golden_file=str(golden_file), k=5, user_id=None))
 
-    assert requested_backends == ["gemini"]  # override wins over llm_backend ("groq")
+    assert requested_backends == ["gemini"]
 
 
 async def test_evaluate_context_precision_falls_back_to_llm_backend_when_override_unset(
@@ -192,7 +180,7 @@ async def test_evaluate_context_precision_falls_back_to_llm_backend_when_overrid
 
     await cli._cmd_evaluate_context_precision(SimpleNamespace(golden_file=str(golden_file), k=5, user_id=None))
 
-    assert requested_backends == ["local"]  # no override -> falls back to llm_backend
+    assert requested_backends == ["local"]
 
 
 async def test_ingest_prints_error_and_exits_nonzero_on_failure(
@@ -200,7 +188,7 @@ async def test_ingest_prints_error_and_exits_nonzero_on_failure(
 ):
     _patch_common(monkeypatch, db_session, fake_embedder, fake_vector_store, tmp_path / "graph.json")
 
-    file_path = tmp_path / "archive.zip"  # unsupported extension -> ingest_index_and_graph fails cleanly
+    file_path = tmp_path / "archive.zip"
     file_path.write_bytes(b"not a real file type we parse")
 
     import pytest
@@ -224,7 +212,7 @@ async def test_query_prints_error_event_to_stderr(
         async def generate_stream(self, system_prompt, user_prompt):
             if True:
                 raise LLMError("the model server is unreachable")
-            yield ""  # pragma: no cover - unreachable; keeps this an async generator function
+            yield ""  # pragma: no cover
 
     _patch_common(monkeypatch, db_session, fake_embedder, fake_vector_store, tmp_path / "graph.json")
     monkeypatch.setattr(cli, "get_llm_backend", lambda: FailingLLM())

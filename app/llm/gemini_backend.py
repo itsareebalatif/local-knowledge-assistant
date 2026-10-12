@@ -1,12 +1,3 @@
-"""Optional cloud LLM backend via Google AI Studio's OpenAI-compatible
-endpoint (FR-4.5). Only used if the user opts in with GEMINI_API_KEY set —
-same privacy trade-off as GroqLLM: chunk text leaves the machine.
-
-Google exposes Gemini through an OpenAI-compatible `/chat/completions`
-route, so this mirrors groq_backend.py almost exactly — same request
-shape, same SSE "data: {...}" streaming format, same error handling.
-"""
-
 from __future__ import annotations
 
 import json
@@ -32,14 +23,13 @@ class GeminiLLM(LLMBackend):
         self.model = model or settings.gemini_model
         self.timeout = timeout if timeout is not None else settings.gemini_timeout_seconds
         self._transport = transport
-        # Set by generate_stream from the final SSE chunk's "usage" field,
-        # if present — same convention as GroqLLM.last_usage.
         self.last_usage: dict[str, int] | None = None
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
         if not self.api_key:
             raise LLMError("GEMINI_API_KEY is not set — add it to .env or switch to a different backend.")
 
+        settings = get_settings()
         payload = {
             "model": self.model,
             "messages": [
@@ -47,6 +37,8 @@ class GeminiLLM(LLMBackend):
                 {"role": "user", "content": user_prompt},
             ],
             "stream": True,
+            # No "seed": Gemini's OpenAI-compatible endpoint rejects it (400 Unknown name "seed").
+            "temperature": settings.llm_temperature,
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
         try:

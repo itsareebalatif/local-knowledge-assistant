@@ -21,11 +21,7 @@ class UserAuth(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"), unique=True, index=True, nullable=False
     )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Column name kept as "refresh_token_hash" (the name it was created
-    # with) even though it now stores the access token's hash — renaming a
-    # live SQLite column needs a migration for no real benefit. The actual
-    # refresh token (below) needed a genuinely new column, hence the
-    # deliberately different DB name "refresh_hash" for it.
+    # DB column name "refresh_token_hash" predates this field; kept to avoid a migration.
     access_token_hash: Mapped[str | None] = mapped_column("refresh_token_hash", String(255), nullable=True)
     access_token_expires_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refresh_token_hash: Mapped[str | None] = mapped_column("refresh_hash", String(255), nullable=True)
@@ -33,5 +29,7 @@ class UserAuth(Base):
         "refresh_expires_at", DateTime(timezone=True), nullable=True
     )
     last_login_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reset_token_expires_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="auth")

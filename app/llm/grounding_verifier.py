@@ -1,20 +1,3 @@
-"""Post-generation Grounding Verifier (FR-4.5 Pipeline 2).
-
-The pre-retrieval gate (app/search/grounding_gate.py) already confirmed the
-*retrieved context* was worth answering from — this checks the opposite
-direction: did the *model's actual answer* stay inside that context, or did
-it wander off and state something the passages never said? An LLM can still
-hallucinate even with good context in front of it.
-
-Deliberately non-LLM, same philosophy as spaCy entity extraction: a second
-model call to grade the first model's output would be slow, non-deterministic,
-and itself capable of being wrong. Instead, each sentence of the answer is
-checked for keyword overlap with the retrieved context — cheap, fast,
-explainable, and this is a warning/annotation layer, not a second hard gate:
-the answer still reaches the user, flagged, rather than being silently
-discarded after the user already waited for it to generate.
-"""
-
 from __future__ import annotations
 
 import re
@@ -26,6 +9,20 @@ from app.search.types import CandidateChunk
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 
+# The system prompt explicitly tells the model to use this phrasing when it
+# can't answer from the context (app/llm/prompts.py). A refusal makes no
+# factual claims, so scoring its keyword overlap against the context is
+# meaningless — "know"/"don't" are common enough to trivially match almost
+# any real passage, which previously made a plain "I don't know." show up
+# as "100% grounded" (confirmed live: it did). Only short answers are
+# checked so this can't suppress verification of a longer answer that
+# merely mentions uncertainty in passing.
+_NO_ANSWER_PATTERN = re.compile(
+    r"\b(i\s+don'?t\s+know|i\s+do\s+not\s+know|not\s+enough\s+information|cannot\s+determine|can'?t\s+determine)\b",
+    re.IGNORECASE,
+)
+_NO_ANSWER_MAX_WORDS = 20
+
 
 @dataclass
 class SentenceGrounding:
@@ -36,7 +33,7 @@ class SentenceGrounding:
 
 @dataclass
 class GroundingCheckResult:
-    overall_coverage: float
+    overall_coverage: float | None
     sentences: list[SentenceGrounding] = field(default_factory=list)
     unsupported_sentences: list[str] = field(default_factory=list)
 
@@ -56,6 +53,9 @@ def verify_grounding(
 
     if not raw_sentences:
         return GroundingCheckResult(overall_coverage=1.0)
+
+    if len(answer.split()) <= _NO_ANSWER_MAX_WORDS and _NO_ANSWER_PATTERN.search(answer):
+        return GroundingCheckResult(overall_coverage=None)
 
     sentence_results = []
     for sentence in raw_sentences:

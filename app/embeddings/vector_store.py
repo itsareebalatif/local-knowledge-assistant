@@ -1,9 +1,3 @@
-"""Vector store abstraction (FR-3.2). ChromaVectorStore is the default,
-concrete implementation; a FAISS backend can be added later behind the same
-VectorStore interface without touching any caller (NFR-9: swappable vector
-tools).
-"""
-
 from __future__ import annotations
 
 import logging
@@ -15,10 +9,7 @@ from chromadb.config import Settings as ChromaSettings
 
 from app.config import get_settings
 
-# Chroma's telemetry module has a known version mismatch with the `posthog`
-# package that logs a scary-looking (but harmless — already caught
-# internally) ERROR on every call. anonymized_telemetry=False below stops it
-# from actually sending anything; this just stops it from logging about it.
+# Silences a harmless ERROR from a known chromadb/posthog version mismatch.
 logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
 
 
@@ -31,15 +22,11 @@ class VectorStore(ABC):
     @abstractmethod
     def query(self, embedding: list[float], top_k: int = 5, where: dict | None = None) -> list[dict]: ...
 
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None: ...
+
 
 class ChromaVectorStore(VectorStore):
-    """Local, on-disk Chroma collection.
-
-    `anonymized_telemetry=False` is deliberate, not a default we happened to
-    keep: Chroma phones home by default, which would break this project's
-    zero-data-tracking requirement (NFR-5) if left on.
-    """
-
     def __init__(self, path: str | None = None, collection_name: str | None = None):
         settings = get_settings()
         store_path = Path(path or settings.vector_store_path)
@@ -65,3 +52,8 @@ class ChromaVectorStore(VectorStore):
             {"id": ids[i], "document": documents[i], "distance": distances[i], "metadata": metadatas[i]}
             for i in range(len(ids))
         ]
+
+    def delete(self, ids: list[str]) -> None:
+        if not ids:
+            return
+        self._collection.delete(ids=ids)

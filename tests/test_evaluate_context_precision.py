@@ -23,8 +23,6 @@ def test_parse_verdicts_reads_relevant_and_not_relevant_lines():
 
 
 def test_parse_verdicts_defaults_missing_or_malformed_lines_to_not_relevant():
-    # Chunk 2 never shows up in the output at all — must not default to
-    # relevant just because the judge forgot it or produced garbage.
     judge_output = "Chunk 1: RELEVANT\nI'm not sure about the rest.\n"
     assert _parse_verdicts(judge_output, num_chunks=2) == [True, False]
 
@@ -40,14 +38,12 @@ def test_parse_claim_verdicts_reads_attributable_and_not_attributable_lines():
 
 
 def test_parse_claim_verdicts_derives_count_from_the_highest_claim_number_seen():
-    # The judge decides how many atomic claims exist — nothing upstream
-    # tells it a fixed count, unlike chunk verdicts (we supplied those).
     judge_output = "Claim 1: ATTRIBUTABLE\nClaim 2: NOT_ATTRIBUTABLE\nClaim 3: ATTRIBUTABLE\nClaim 4: ATTRIBUTABLE\n"
     assert _parse_claim_verdicts(judge_output) == [True, False, True, True]
 
 
 def test_parse_claim_verdicts_fills_a_skipped_number_with_not_attributable():
-    judge_output = "Claim 1: ATTRIBUTABLE\nClaim 3: ATTRIBUTABLE\n"  # claim 2 missing entirely
+    judge_output = "Claim 1: ATTRIBUTABLE\nClaim 3: ATTRIBUTABLE\n"
     assert _parse_claim_verdicts(judge_output) == [True, False, True]
 
 
@@ -56,8 +52,6 @@ def test_parse_claim_verdicts_returns_empty_list_when_nothing_parses():
 
 
 def test_parse_claim_and_chunk_verdicts_dont_cross_contaminate():
-    # Both sections share the same "<n>: LABEL" shape — proves the chunk
-    # parser doesn't accidentally pick up claim lines or vice versa.
     judge_output = "Chunk 1: RELEVANT\nClaim 1: NOT_ATTRIBUTABLE\n"
     assert _parse_verdicts(judge_output, num_chunks=1) == [True]
     assert _parse_claim_verdicts(judge_output) == [False]

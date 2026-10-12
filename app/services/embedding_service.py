@@ -35,10 +35,7 @@ async def embed_pending_chunks(
     vectors = await embedder.embed(texts, input_type="search_document")
 
     vector_ids = [f"chunk-{c.chunk_id}" for c in chunks]
-    # user_id is read straight from the DB (via the chunk's owning document)
-    # rather than trusted from a caller argument — this is the metadata that
-    # app.search.vector_search's where={"user_id": ...} filter relies on to
-    # keep one user's query from ever matching another user's vectors.
+    # user_id comes from the DB, not a caller arg, so vector_search's user filter can't be bypassed
     metadatas = [{"doc_id": chunk.doc_id, "chunk_id": chunk.chunk_id, "user_id": owner_id} for chunk, owner_id in rows]
     vector_store.add(ids=vector_ids, embeddings=vectors, documents=texts, metadatas=metadatas)
 

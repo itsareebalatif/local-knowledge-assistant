@@ -37,18 +37,14 @@ def test_init_db_is_safe_to_run_twice(tmp_path, monkeypatch):
     monkeypatch.setattr(init_db_module, "engine", test_engine)
 
     init_db_module.init_db()
-    init_db_module.init_db()  # must not raise — idempotent schema setup
+    init_db_module.init_db()
 
     inspector = inspect(test_engine)
     assert "users" in inspector.get_table_names()
 
 
 def test_init_db_adds_access_token_expires_at_to_a_pre_existing_user_auth_table(tmp_path, monkeypatch):
-    """`create_all` never alters an existing table, so a database created
-    before UserAuth.access_token_expires_at existed would otherwise be stuck
-    without it forever. Simulates that by building the table by hand
-    without the column, then checking init_db() adds it rather than
-    silently leaving the old schema in place."""
+    # create_all never alters an existing table, so this must be a real migration, not a no-op.
     test_engine = create_engine(f"sqlite:///{tmp_path / 'test.sqlite3'}", future=True)
     with test_engine.begin() as conn:
         conn.execute(

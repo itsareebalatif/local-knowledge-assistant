@@ -111,6 +111,31 @@ def test_mmr_select_is_not_fooled_by_a_sharply_collapsed_score_distribution():
     assert candidates[1].chunk_id in [c.chunk_id for c in selected]  # the genuine runner-up survives
 
 
+def test_mmr_select_new_default_lambda_favors_a_same_topic_runner_up_over_an_irrelevant_one():
+    # Regression test for a real failure, found via a live query against a
+    # real document: a chunk from a completely unrelated document got
+    # selected over a clearly relevant runner-up chunk from the same
+    # document as the top match, purely because the runner-up was
+    # naturally *similar* to the top match (same topic, same source
+    # document) and so paid a diversity penalty for it, while the
+    # irrelevant chunk's total dissimilarity gave it a free pass.
+    candidates = [
+        CandidateChunk(chunk_id=1, doc_id=1, content="top match", score=0.0, sources=[]),
+        CandidateChunk(chunk_id=2, doc_id=1, content="runner-up, same topic as the top match", score=0.0, sources=[]),
+        CandidateChunk(chunk_id=3, doc_id=2, content="irrelevant, unrelated topic", score=0.0, sources=[]),
+    ]
+    embeddings = [[1.0, 0.0], [0.8, 0.3], [0.0, 1.0]]
+
+    selected_default = mmr_select(candidates, embeddings, k=2, lambda_param=0.7)
+    assert [c.chunk_id for c in selected_default] == [1, 2]
+
+    # Confirms this isn't a trivial assertion — the old lambda=0.5 default
+    # really did let the irrelevant chunk in ahead of the same-topic
+    # runner-up, on this exact input.
+    selected_old_default = mmr_select(candidates, embeddings, k=2, lambda_param=0.5)
+    assert [c.chunk_id for c in selected_old_default] == [1, 3]
+
+
 def test_mmr_select_never_picks_the_same_candidate_twice():
     candidates = [CandidateChunk(chunk_id=i, doc_id=1, content=f"chunk {i}", score=0.5, sources=[]) for i in range(1, 4)]
     embeddings = [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]  # all identical — worst case for accidental re-selection

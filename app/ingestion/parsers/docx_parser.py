@@ -1,12 +1,3 @@
-"""DOCX parser (python-docx).
-
-python-docx exposes `document.paragraphs` and `document.tables` as two
-separate flat lists, which loses their real interleaving order in the file.
-We instead walk `document.element.body` directly and re-wrap each child as a
-Paragraph or Table, so a table that sits between two paragraphs stays there
-instead of being moved to the end.
-"""
-
 from __future__ import annotations
 
 import io
@@ -27,7 +18,7 @@ _TITLE_STYLE = re.compile(r"^Title$", re.IGNORECASE)
 
 
 def _iter_block_items(document: docx.Document):
-    """Yield each top-level Paragraph/Table in document body order."""
+    # walk body directly (not .paragraphs/.tables) to preserve interleaving order
     for child in document.element.body.iterchildren():
         if child.tag == qn("w:p"):
             yield Paragraph(child, document)

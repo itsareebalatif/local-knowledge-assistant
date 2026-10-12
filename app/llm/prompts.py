@@ -1,14 +1,3 @@
-"""Fact-restricted prompt templates (FR-4.5 Pipeline 2).
-
-The system prompt is the actual hallucination guard at generation time (the
-grounding gate in Pipeline 1 already ensured there's something worth
-answering from — this is what stops the LLM from answering outside it
-anyway). The user prompt numbers each candidate chunk [1], [2], ... and asks
-the model to cite by that number; citations.py reuses the exact same
-numbering afterward so a [2] in the model's answer and citation #2 in the
-API response always refer to the same chunk.
-"""
-
 from __future__ import annotations
 
 from app.search.types import CandidateChunk
@@ -25,7 +14,7 @@ SYSTEM_PROMPT = (
 
 
 def build_user_prompt(query: str, candidates: list[CandidateChunk]) -> tuple[str, dict[int, int]]:
-    """Returns (prompt_text, {chunk_id: citation_marker_number})."""
+    # Chunk numbering here must match app/llm/citations.py's marker numbering.
     marker_by_chunk_id = {c.chunk_id: i + 1 for i, c in enumerate(candidates)}
     context_blocks = "\n\n".join(f"[{i + 1}] {c.content}" for i, c in enumerate(candidates))
     prompt = f"Context passages:\n{context_blocks}\n\nQuestion: {query}\n\nAnswer:"

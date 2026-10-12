@@ -12,7 +12,6 @@ from app.embeddings.vector_store import ChromaVectorStore
 def _fake_ollama_handler(request: httpx.Request) -> httpx.Response:
     body = json.loads(request.content)
     texts = body["input"]
-    # Deterministic fake vector per text so assertions are exact.
     vectors = [[float(len(t)), 0.0, 1.0] for t in texts]
     return httpx.Response(200, json={"embeddings": vectors})
 
@@ -32,8 +31,6 @@ async def test_embedder_returns_empty_list_for_no_texts():
 
 
 async def test_embedder_raises_clear_error_when_ollama_unreachable():
-    # No mock transport, no server listening on this port: a real connection
-    # failure, proving the error path works without needing a live Ollama.
     embedder = OllamaEmbedder(base_url="http://127.0.0.1:1", timeout=2.0)
     with pytest.raises(EmbeddingError, match="Is it running"):
         await embedder.embed(["hello"])

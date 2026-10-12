@@ -28,6 +28,23 @@ async def test_ollama_streams_pieces_in_order():
     assert pieces == ["Hello ", "world."]
 
 
+async def test_ollama_sends_temperature_and_seed_under_options(monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_temperature", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "llm_seed", 42, raising=False)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return _ollama_ndjson_handler(request)
+
+    transport = httpx.MockTransport(handler)
+    llm = OllamaLLM(base_url="http://fake-ollama", transport=transport)
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert captured["payload"]["options"] == {"temperature": 0.0, "seed": 42}
+
+
 async def test_ollama_raises_clear_error_when_unreachable():
     # No mock transport, nothing listening on this port: a real connection
     # failure, proving the error path works without needing a live Ollama.
@@ -120,6 +137,24 @@ async def test_groq_raises_on_bad_status():
             pass
 
 
+async def test_groq_sends_temperature_and_seed(monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_temperature", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "llm_seed", 42, raising=False)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return _groq_sse_handler(request)
+
+    transport = httpx.MockTransport(handler)
+    llm = GroqLLM(api_key="test-key", base_url="http://fake-groq", transport=transport)
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert captured["payload"]["temperature"] == 0.0
+    assert captured["payload"]["seed"] == 42
+
+
 async def test_groq_raises_clear_error_on_timeout():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("simulated slow response")
@@ -129,6 +164,60 @@ async def test_groq_raises_clear_error_on_timeout():
     with pytest.raises(LLMError, match="did not respond"):
         async for _ in llm.generate_stream("sys", "user"):
             pass
+
+
+async def test_groq_sends_a_max_completion_tokens_budget():
+    # openai/gpt-oss-20b spends tokens on hidden "reasoning" before writing
+    # "content" — confirmed live that a tight budget lets reasoning consume
+    # the whole cap, leaving content empty. Needs real headroom, not just
+    # whatever Groq's own unset default happens to be.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return _groq_sse_handler(request)
+
+    transport = httpx.MockTransport(handler)
+    llm = GroqLLM(api_key="test-key", base_url="http://fake-groq", transport=transport)
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert captured["payload"]["max_completion_tokens"] == 2048
+
+
+async def test_groq_raises_a_clear_error_when_reasoning_exhausts_the_token_budget():
+    # Regression for a real, confirmed-live failure: a reasoning model can
+    # hit finish_reason="length" while still mid-reasoning, so "content" never
+    # gets written — the app must surface this as an error, not a silent
+    # blank answer dressed up as a trivially "fully grounded" response.
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    transport = httpx.MockTransport(handler)
+    llm = GroqLLM(api_key="test-key", base_url="http://fake-groq", transport=transport)
+    with pytest.raises(LLMError, match="ran out of room"):
+        async for _ in llm.generate_stream("sys", "user"):
+            pass
+
+
+async def test_groq_does_not_raise_when_length_is_hit_after_real_content_was_written():
+    # A normal answer can also legitimately hit the token cap (a long,
+    # well-supported response) — only an EMPTY completion at finish_reason
+    # "length" is the reasoning-starved failure case worth raising on.
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            'data: {"choices":[{"delta":{"content":"A full answer."}}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    transport = httpx.MockTransport(handler)
+    llm = GroqLLM(api_key="test-key", base_url="http://fake-groq", transport=transport)
+    pieces = [p async for p in llm.generate_stream("sys", "user")]
+    assert pieces == ["A full answer."]
 
 
 def _gemini_sse_handler(request: httpx.Request) -> httpx.Response:
@@ -145,6 +234,26 @@ async def test_gemini_streams_pieces_in_order():
     llm = GeminiLLM(api_key="test-key", base_url="http://fake-gemini", transport=transport)
     pieces = [p async for p in llm.generate_stream("sys", "user")]
     assert pieces == ["Hey ", "there."]
+
+
+async def test_gemini_sends_temperature_but_not_seed(monkeypatch):
+    # Gemini's OpenAI-compatible endpoint rejects "seed" outright
+    # (confirmed live: 400, "Unknown name \"seed\": Cannot find field") —
+    # unlike Groq/Ollama, only temperature should ever be sent.
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_temperature", 0.0, raising=False)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return _gemini_sse_handler(request)
+
+    transport = httpx.MockTransport(handler)
+    llm = GeminiLLM(api_key="test-key", base_url="http://fake-gemini", transport=transport)
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert captured["payload"]["temperature"] == 0.0
+    assert "seed" not in captured["payload"]
 
 
 async def test_gemini_without_api_key_raises_immediately(monkeypatch):

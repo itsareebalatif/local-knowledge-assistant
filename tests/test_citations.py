@@ -26,8 +26,6 @@ def test_build_citations_numbers_in_order_and_resolves_file_names(db_session, ma
 
 
 def test_build_citations_handles_missing_document_gracefully(db_session):
-    # A candidate referencing a doc_id that doesn't exist in the DB — should
-    # never crash, just fall back to a placeholder name.
     candidate = CandidateChunk(chunk_id=999, doc_id=999, content="orphan content", score=1.0)
     citations = build_citations(db_session, [candidate])
     assert citations[0].file_name == "document-999"

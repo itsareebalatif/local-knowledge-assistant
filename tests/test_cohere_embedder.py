@@ -46,11 +46,7 @@ async def test_cohere_returns_empty_list_for_no_texts():
 
 
 async def test_cohere_without_api_key_raises_immediately(monkeypatch):
-    # CohereEmbedder(api_key=None) alone isn't enough to prove this: the
-    # constructor falls back to settings.cohere_api_key when the explicit
-    # arg is falsy, so if the real .env has a key set, that fallback would
-    # silently supply one and this test would pass for the wrong reason.
-    # Force the setting itself blank so the test is isolated from .env.
+    # Settings must be forced blank: a real .env with a key would mask this via constructor fallback.
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "cohere_api_key", None, raising=False)
@@ -60,8 +56,6 @@ async def test_cohere_without_api_key_raises_immediately(monkeypatch):
 
 
 async def test_cohere_raises_clear_error_when_unreachable():
-    # No mock transport, nothing listening: a real connection failure,
-    # proving the error path works without needing a live Cohere account.
     embedder = CohereEmbedder(api_key="test-key", base_url="http://127.0.0.1:1", timeout=2.0)
     with pytest.raises(EmbeddingError, match="Could not reach Cohere"):
         await embedder.embed(["hello"])

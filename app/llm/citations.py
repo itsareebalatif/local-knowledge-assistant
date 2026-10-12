@@ -1,15 +1,3 @@
-"""Interactive source citations (FR-4.4).
-
-Numbering matches app/llm/prompts.py's build_user_prompt exactly — citation
-#2 in the API response is always the same chunk the model was told to mark
-as [2], so a citation always points at what the model actually cited.
-
-`source_url` is a placeholder path (no document-serving endpoint exists yet
-— that's a later Day-3 API item) but the field is here now so a frontend can
-already render citations as clickable links without an API shape change
-later.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,6 +22,7 @@ class Citation:
 
 
 def build_citations(db: Session, candidates: list[CandidateChunk]) -> list[Citation]:
+    # Marker numbering must match app/llm/prompts.py's build_user_prompt exactly.
     doc_ids = {c.doc_id for c in candidates}
     docs = db.execute(select(Document).where(Document.doc_id.in_(doc_ids))).scalars().all()
     docs_by_id = {d.doc_id: d for d in docs}

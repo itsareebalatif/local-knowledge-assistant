@@ -1,15 +1,3 @@
-"""kengine — command-line interface (SRS 5.1).
-
-    kengine ingest <path> [--user-id N]
-    kengine query "<question>"
-    kengine evaluate <cases.json> [--k N]
-    kengine evaluate-context-precision <golden.json> [--k N]
-
-Builds real singletons per invocation (Ollama embedder/LLM, Chroma, spaCy,
-the on-disk graph) and talks to the same service layer the FastAPI app
-uses — no HTTP round trip, same code path either way.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -95,7 +83,7 @@ async def _cmd_query(args: argparse.Namespace) -> None:
             full_answer_parts: list[str] = []
             async for event in generate_answer_stream(db, llm, retrieval_outcome):
                 if event["type"] == "token":
-                    print(event["text"], end="", flush=True)  # real-time stdout token printing (SRS 5.1)
+                    print(event["text"], end="", flush=True)
                     full_answer_parts.append(event["text"])
                 elif event["type"] == "error":
                     print(f"\n[error] {event['message']}", file=sys.stderr)
@@ -109,9 +97,7 @@ async def _cmd_query(args: argparse.Namespace) -> None:
             update(root, output={"status": retrieval_outcome.status, "answer": "".join(full_answer_parts)})
     finally:
         db.close()
-        # Short-lived process: without an explicit flush, buffered
-        # observations can be lost when the interpreter exits before the
-        # SDK's background thread sends them.
+        # explicit flush: short-lived process may exit before the SDK's background thread sends traces
         langfuse = get_langfuse()
         if langfuse is not None:
             langfuse.flush()
@@ -158,9 +144,7 @@ async def _cmd_evaluate_context_precision(args: argparse.Namespace) -> None:
         vector_store = ChromaVectorStore()
         graph_builder = CooccurrenceGraphBuilder.load(settings.graph_store_path)
         extractor = SpacyEntityExtractor()
-        # Judging can run on a different backend than live generation does —
-        # EVAL_LLM_BACKEND overrides LLM_BACKEND for this call only, and
-        # defaults to it (unchanged behavior) when left unset in .env.
+        # EVAL_LLM_BACKEND overrides LLM_BACKEND for judging only, falling back to it if unset
         llm = get_llm_backend(settings.eval_llm_backend or settings.llm_backend)
         reranker = CrossEncoderReranker() if settings.rerank_enabled else None
 

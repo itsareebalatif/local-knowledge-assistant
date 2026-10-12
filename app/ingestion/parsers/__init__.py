@@ -1,10 +1,3 @@
-"""Parser registry — maps a normalized file_type to a parser instance.
-
-`file_type` values match Document.file_type in app/models/document.py
-("PDF", "MD", "HTML", "DOCX", "TXT"), which is itself what the ERD in the
-SRS specifies.
-"""
-
 from __future__ import annotations
 
 from app.ingestion.exceptions import UnsupportedFileTypeError

@@ -1,8 +1,3 @@
-"""Registration, login, logout, and token refresh — the actual auth logic,
-independent of the HTTP layer (app/api/auth_routes.py is a thin wrapper
-over this, same pattern as every other service in app/services/).
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -30,19 +25,21 @@ class InvalidRefreshTokenError(Exception):
     pass
 
 
+class InvalidResetTokenError(Exception):
+    pass
+
+
 @dataclass
 class AuthResult:
     user: User
-    access_token: str  # raw tokens — shown to the caller exactly once, never stored raw
+    access_token: str
     access_token_expires_at: datetime.datetime
     refresh_token: str
     refresh_token_expires_at: datetime.datetime
 
 
 def _as_aware_utc(value: datetime.datetime) -> datetime.datetime:
-    # SQLite doesn't persist tzinfo — a value round-tripped through the DB
-    # comes back naive even though it was stored as UTC-aware, so it has to
-    # be re-labeled before comparing against utcnow().
+    # SQLite doesn't persist tzinfo, so a stored UTC value comes back naive.
     if value.tzinfo is None:
         return value.replace(tzinfo=datetime.timezone.utc)
     return value
@@ -77,7 +74,7 @@ def register_user(db: Session, email: str, password: str, full_name: str) -> Aut
 
     user = User(email=email, full_name=full_name, role="USER")
     db.add(user)
-    db.flush()  # need user.user_id for the UserAuth row below
+    db.flush()  # need user.user_id for the UserAuth row
 
     auth = UserAuth(user_id=user.user_id, password_hash=hash_password(password))
     db.add(auth)
@@ -97,8 +94,7 @@ def register_user(db: Session, email: str, password: str, full_name: str) -> Aut
 def login_user(db: Session, email: str, password: str) -> AuthResult:
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if user is None or user.auth is None or not verify_password(password, user.auth.password_hash):
-        # Deliberately the same error for "no such user" and "wrong password" —
-        # distinguishing them lets an attacker enumerate registered emails.
+        # Same error for both cases to avoid leaking which emails are registered.
         raise InvalidCredentialsError("Invalid email or password")
     if not user.is_active:
         raise InvalidCredentialsError("Invalid email or password")
@@ -117,11 +113,6 @@ def login_user(db: Session, email: str, password: str) -> AuthResult:
 
 
 def refresh_access_token(db: Session, refresh_token: str) -> AuthResult:
-    """Trades a still-valid refresh token for a brand-new token pair. The
-    refresh token itself is rotated (the old one stops working the moment
-    this call succeeds) — if someone else ever gets hold of it and uses it
-    first, the legitimate client's own next refresh attempt will fail here
-    (InvalidRefreshTokenError), which is the signal that it was stolen."""
     token_hash = hash_token(refresh_token)
     auth = db.execute(select(UserAuth).where(UserAuth.refresh_token_hash == token_hash)).scalar_one_or_none()
     if auth is None:
@@ -143,6 +134,41 @@ def refresh_access_token(db: Session, refresh_token: str) -> AuthResult:
     )
 
 
+def request_password_reset(db: Session, email: str) -> tuple[User, str] | None:
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if user is None or user.auth is None or not user.is_active:
+        return None
+
+    token = generate_token()
+    expires_at = utcnow() + datetime.timedelta(minutes=get_settings().password_reset_token_expire_minutes)
+    user.auth.reset_token_hash = hash_token(token)
+    user.auth.reset_token_expires_at = expires_at
+    db.commit()
+    return user, token
+
+
+def reset_password(db: Session, token: str, new_password: str) -> User:
+    token_hash = hash_token(token)
+    auth = db.execute(select(UserAuth).where(UserAuth.reset_token_hash == token_hash)).scalar_one_or_none()
+    if auth is None:
+        raise InvalidResetTokenError("Invalid or already-used reset token")
+    if auth.reset_token_expires_at is None or _as_aware_utc(auth.reset_token_expires_at) < utcnow():
+        raise InvalidResetTokenError("Reset token has expired")
+    if not auth.user.is_active:
+        raise InvalidResetTokenError("Invalid or already-used reset token")
+
+    auth.password_hash = hash_password(new_password)
+    auth.reset_token_hash = None
+    auth.reset_token_expires_at = None
+    # A password reset invalidates existing sessions too — assume compromise.
+    auth.access_token_hash = None
+    auth.access_token_expires_at = None
+    auth.refresh_token_hash = None
+    auth.refresh_token_expires_at = None
+    db.commit()
+    return auth.user
+
+
 def logout_user(db: Session, user: User) -> None:
     if user.auth is not None:
         user.auth.access_token_hash = None
@@ -159,5 +185,5 @@ def get_user_by_token(db: Session, token: str) -> User | None:
         return None
     expires_at = auth.access_token_expires_at
     if expires_at is not None and _as_aware_utc(expires_at) < utcnow():
-        return None  # expired — the client is expected to call /api/auth/refresh, not treat this as fatal
+        return None
     return auth.user

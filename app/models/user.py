@@ -1,5 +1,3 @@
-"""User model — account profile / identity. See SRS ERD (section 4.3)."""
-
 from __future__ import annotations
 
 import datetime
@@ -12,6 +10,7 @@ from app.db.base import Base
 from app.models._utils import utcnow
 
 if TYPE_CHECKING:
+    from app.models.conversation import Conversation
     from app.models.document import Document
     from app.models.user_auth import UserAuth
 
@@ -28,3 +27,4 @@ class User(Base):
 
     auth: Mapped["UserAuth"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="owner", cascade="all, delete-orphan")

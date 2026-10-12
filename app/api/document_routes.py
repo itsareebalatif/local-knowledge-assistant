@@ -1,18 +1,14 @@
-"""Document listing — lets a logged-in user see what they've actually
-uploaded: which files, how many chunks each produced, and a running total.
-Nothing here was previously exposed; before this, the only way to find out
-was to query the database directly.
-"""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import DocumentListResponse, DocumentOut
-from app.dependencies import get_current_user, get_db
+from app.config import get_settings
+from app.dependencies import get_current_user, get_db, get_graph_builder, get_vector_store
 from app.models import Chunk, Document, User
+from app.services.document_service import delete_document
 
 router = APIRouter()
 
@@ -43,3 +39,22 @@ def list_documents(current_user: User = Depends(get_current_user), db: Session =
         total_documents=len(documents),
         total_chunks=sum(d.chunk_count for d in documents),
     )
+
+
+@router.delete(
+    "/documents/{doc_id}",
+    tags=["documents"],
+    summary="Delete a document — removes its chunks, vectors, and graph references too",
+)
+def delete_document_route(
+    doc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    vector_store=Depends(get_vector_store),
+    graph_builder=Depends(get_graph_builder),
+) -> dict:
+    deleted = delete_document(db, vector_store, graph_builder, current_user.user_id, doc_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    graph_builder.save(get_settings().graph_store_path)
+    return {"status": "deleted", "doc_id": doc_id}

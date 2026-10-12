@@ -1,5 +1,3 @@
-"""EntityNode model — a graph entity extracted from chunks via spaCy NER (non-LLM)."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -31,7 +29,4 @@ class EntityNode(Base):
         foreign_keys="RelationEdge.target_entity_id", back_populates="target_entity", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        # Same entity name+type should resolve to one node (coreference merge, SRS 4.5).
-        UniqueConstraint("name", "type", name="uq_entity_name_type"),
-    )
+    __table_args__ = (UniqueConstraint("name", "type", name="uq_entity_name_type"),)

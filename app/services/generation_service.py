@@ -1,17 +1,3 @@
-"""Pipeline 2: Prompt Synthesis, Grounded Generation & Citation (FR-4.5).
-
-Consumes the RetrievalOutcome Pipeline 1 (retrieval_service.py) already
-produced. If Pipeline 1 already refused, this yields a single refusal event
-and never touches the LLM — that separation (Pipeline 1 can veto Pipeline 2
-outright) is the entire point of the two-pipeline split, not something this
-function re-checks itself.
-
-Otherwise: builds the fact-restricted prompt, streams the answer piece by
-piece (so an API layer can forward it over SSE token-by-token), and once the
-full answer is assembled, runs the post-generation grounding verifier and
-builds citations before yielding the final event.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -34,9 +20,6 @@ async def generate_answer_stream(
     db: Session, llm: LLMBackend, retrieval_outcome: RetrievalOutcome
 ) -> AsyncIterator[dict]:
     if retrieval_outcome.status != "grounded":
-        # Pipeline 1 already veto'd this one — no LLM call happens, so no
-        # generation observation either; one would misleadingly suggest a
-        # model was invoked when it never was.
         yield {"type": "refused", "reason": retrieval_outcome.reason, "metrics": retrieval_outcome.metrics}
         return
 
@@ -56,9 +39,7 @@ async def generate_answer_stream(
             return
 
         full_answer = "".join(answer_parts)
-        # Only Groq/Gemini currently populate this (parsed from the final
-        # SSE chunk's "usage" field) — None for Ollama, which update()
-        # silently drops rather than sending a misleading zero.
+        # None for Ollama; update() drops None rather than sending a misleading zero
         usage = getattr(llm, "last_usage", None)
         update(gen_obs, output=full_answer, usage_details=usage)
 
@@ -87,12 +68,22 @@ async def generate_answer_stream(
             verification.overall_coverage,
         )
 
+    grounding = {
+        "overall_coverage": verification.overall_coverage,
+        "unsupported_sentences": verification.unsupported_sentences,
+    }
+
+    # Every sentence failed grounding — the model answered from its own
+    # knowledge rather than the retrieved chunks. `overall_coverage is None`
+    # is the deliberate "I don't know" case (see grounding_verifier) and is
+    # already a safe non-answer, not a hallucination to catch here.
+    if verification.sentences and len(verification.unsupported_sentences) == len(verification.sentences):
+        yield {"type": "refused", "reason": "ungrounded_answer", "metrics": grounding}
+        return
+
     yield {
         "type": "done",
         "answer": full_answer,
         "citations": [asdict(c) for c in citations],
-        "grounding": {
-            "overall_coverage": verification.overall_coverage,
-            "unsupported_sentences": verification.unsupported_sentences,
-        },
+        "grounding": grounding,
     }

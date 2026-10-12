@@ -4,11 +4,12 @@ import datetime
 
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_db, get_graph_builder
+from app.dependencies import get_db, get_email_sender, get_graph_builder
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.main import app
 from app.models import User
 from app.models._utils import utcnow
+from tests.conftest import FakeEmailSender
 
 
 def _override_db(db_session):
@@ -16,10 +17,8 @@ def _override_db(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = _get_db
-    # A couple of tests below hit /api/graph just to prove a token is
-    # accepted — it needs a graph_builder too, since the app's real lifespan
-    # never runs in these tests (no `with TestClient(app)`).
     app.dependency_overrides[get_graph_builder] = lambda: CooccurrenceGraphBuilder()
+    app.dependency_overrides[get_email_sender] = lambda: FakeEmailSender()
 
 
 def test_register_returns_a_usable_token(db_session):
@@ -35,7 +34,6 @@ def test_register_returns_a_usable_token(db_session):
         assert body["email"] == "new@example.com"
         assert body["access_token"]
 
-        # The token actually works against an authenticated endpoint.
         me_check = client.get("/api/graph", headers={"Authorization": f"Bearer {body['access_token']}"})
         assert me_check.status_code == 200
     finally:
@@ -63,7 +61,7 @@ def test_register_rejects_short_password(db_session):
         response = client.post(
             "/api/auth/register", json={"email": "short@example.com", "password": "123", "full_name": "Short"}
         )
-        assert response.status_code == 422  # pydantic min_length validation
+        assert response.status_code == 422
     finally:
         app.dependency_overrides.clear()
 
@@ -100,8 +98,6 @@ def test_login_with_wrong_password_is_rejected(db_session):
 
 
 def test_login_with_unknown_email_is_rejected_same_as_wrong_password(db_session):
-    # Same status + generic message either way — not distinguishing "no such
-    # user" from "wrong password" is deliberate (see auth_service.login_user).
     _override_db(db_session)
     try:
         client = TestClient(app)
@@ -121,7 +117,7 @@ def test_login_issues_a_new_token_invalidating_the_old_one(db_session):
 
         assert first["access_token"] != second["access_token"]
         old_token_check = client.get("/api/graph", headers={"Authorization": f"Bearer {first['access_token']}"})
-        assert old_token_check.status_code == 401  # only one active session per user, by design
+        assert old_token_check.status_code == 401  # only one active session per user
         new_token_check = client.get("/api/graph", headers={"Authorization": f"Bearer {second['access_token']}"})
         assert new_token_check.status_code == 200
     finally:
@@ -202,7 +198,7 @@ def test_refresh_endpoint_lets_an_expired_access_token_get_a_new_one_without_a_f
         db_session.commit()
 
         old_headers = {"Authorization": f"Bearer {reg['access_token']}"}
-        assert client.get("/api/graph", headers=old_headers).status_code == 401  # this is the moment a client refreshes
+        assert client.get("/api/graph", headers=old_headers).status_code == 401
 
         refreshed = client.post("/api/auth/refresh", json={"refresh_token": reg["refresh_token"]}).json()
         new_headers = {"Authorization": f"Bearer {refreshed['access_token']}"}
@@ -257,5 +253,147 @@ def test_protected_endpoint_rejects_missing_or_malformed_header(db_session):
         assert client.get("/api/graph").status_code == 401
         assert client.get("/api/graph", headers={"Authorization": "not-bearer-format"}).status_code == 401
         assert client.get("/api/graph", headers={"Authorization": "Bearer totally-made-up-token"}).status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_register_sends_a_welcome_email(db_session):
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        client.post(
+            "/api/auth/register",
+            json={"email": "welcome@example.com", "password": "correct horse battery staple", "full_name": "Welcome"},
+        )
+        assert len(sender.calls) == 1
+        to, subject, _html = sender.calls[0]
+        assert to == "welcome@example.com"
+        assert "Welcome" in subject or "Personal Knowledge Engine" in subject
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_forgot_password_sends_a_reset_email_for_a_real_account(db_session):
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        client.post(
+            "/api/auth/register",
+            json={"email": "forgot@example.com", "password": "correct horse battery staple", "full_name": "Forgot"},
+        )
+        sender.calls.clear()
+
+        response = client.post("/api/auth/forgot-password", json={"email": "forgot@example.com"})
+        assert response.status_code == 200
+        assert len(sender.calls) == 1
+        to, subject, html = sender.calls[0]
+        assert to == "forgot@example.com"
+        assert "reset-password?token=" in html
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_forgot_password_gives_the_same_response_for_an_unknown_email(db_session):
+    # Anti-enumeration: response must look the same whether or not the email exists.
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        response = client.post("/api/auth/forgot-password", json={"email": "nobody-here@example.com"})
+        assert response.status_code == 200
+        assert sender.calls == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reset_password_with_a_valid_token_lets_the_user_log_in_with_the_new_password(db_session):
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        client.post(
+            "/api/auth/register",
+            json={"email": "reset@example.com", "password": "old password here", "full_name": "Reset"},
+        )
+        client.post("/api/auth/forgot-password", json={"email": "reset@example.com"})
+        _, _, html = sender.calls[-1]
+        token = html.split("token=")[1].split('"')[0]
+
+        reset_response = client.post(
+            "/api/auth/reset-password", json={"token": token, "new_password": "brand new password"}
+        )
+        assert reset_response.status_code == 200
+
+        old_login = client.post("/api/auth/login", json={"email": "reset@example.com", "password": "old password here"})
+        assert old_login.status_code == 401
+
+        new_login = client.post(
+            "/api/auth/login", json={"email": "reset@example.com", "password": "brand new password"}
+        )
+        assert new_login.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reset_password_rejects_an_unknown_token(db_session):
+    _override_db(db_session)
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/auth/reset-password", json={"token": "totally-made-up", "new_password": "brand new password"}
+        )
+        assert response.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reset_password_token_is_single_use(db_session):
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        client.post(
+            "/api/auth/register",
+            json={"email": "singleuse@example.com", "password": "old password here", "full_name": "Single"},
+        )
+        client.post("/api/auth/forgot-password", json={"email": "singleuse@example.com"})
+        _, _, html = sender.calls[-1]
+        token = html.split("token=")[1].split('"')[0]
+
+        first = client.post("/api/auth/reset-password", json={"token": token, "new_password": "first new password"})
+        assert first.status_code == 200
+
+        replay = client.post("/api/auth/reset-password", json={"token": token, "new_password": "second new password"})
+        assert replay.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reset_password_invalidates_existing_sessions(db_session):
+    sender = FakeEmailSender()
+    _override_db(db_session)
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    try:
+        client = TestClient(app)
+        reg = client.post(
+            "/api/auth/register",
+            json={"email": "forcelogout@example.com", "password": "old password here", "full_name": "Force"},
+        ).json()
+        old_access_token = reg["access_token"]
+
+        client.post("/api/auth/forgot-password", json={"email": "forcelogout@example.com"})
+        _, _, html = sender.calls[-1]
+        token = html.split("token=")[1].split('"')[0]
+        client.post("/api/auth/reset-password", json={"token": token, "new_password": "brand new password"})
+
+        still_works = client.get("/api/graph", headers={"Authorization": f"Bearer {old_access_token}"})
+        assert still_works.status_code == 401
     finally:
         app.dependency_overrides.clear()

@@ -44,8 +44,6 @@ async def test_evaluate_retrieval_scores_zero_when_relevant_chunk_is_unreachable
     db_session, make_chunk, fake_embedder, fake_vector_store, user
 ):
     make_chunk("Some content that exists but isn't the one we're looking for.")
-    # fake_vector_store deliberately left empty, and the "relevant" id below
-    # doesn't correspond to anything retrievable — simulates a genuine gap.
     cases = [EvalCase(query="completely different unmatched question", relevant_chunk_ids={999999})]
 
     report = await evaluate_retrieval(
@@ -57,7 +55,6 @@ async def test_evaluate_retrieval_scores_zero_when_relevant_chunk_is_unreachable
     assert result.recall_at_k == 0.0
     assert result.reciprocal_rank == 0.0
     assert report.mrr == 0.0
-    # Gate should refuse too — nothing relevant was found, so it shouldn't say otherwise.
     assert result.gate_sufficient is False
     assert report.gate_refusal_rate == 1.0
 

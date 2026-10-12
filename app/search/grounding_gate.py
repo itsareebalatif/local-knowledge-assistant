@@ -1,10 +1,7 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.config import get_settings
-from app.search.keyword_utils import significant_terms, term_coverage
 from app.search.types import CandidateChunk
 
 
@@ -16,54 +13,21 @@ class GroundingVerdict:
     metrics: dict = field(default_factory=dict)
 
 
-def evaluate_context_sufficiency(
-    query: str,
-    candidates: list[CandidateChunk],
-    min_score: float | None = None,
-    min_keyword_coverage: float | None = None,
-    min_candidates: int | None = None,
-) -> GroundingVerdict:
-    settings = get_settings()
-    min_score = settings.min_retrieval_score if min_score is None else min_score
-    min_keyword_coverage = settings.min_keyword_coverage if min_keyword_coverage is None else min_keyword_coverage
-    min_candidates = settings.min_grounding_candidates if min_candidates is None else min_candidates
-
+def evaluate_context_sufficiency(query: str, candidates: list[CandidateChunk]) -> GroundingVerdict:
+    # Used to also gate on keyword coverage + semantic similarity of the raw
+    # question against the candidates. Dropped: it judged the *question's*
+    # wording, not whether retrieval actually found the right content, so
+    # typos, paraphrases, and plural/tense mismatches ("borrow" vs
+    # "borrowed") got refused even when the correct chunk was already
+    # sitting at the top of `candidates`. Whether the *answer* is actually
+    # supported is now checked once, after generation, by
+    # app.llm.grounding_verifier against the real answer text instead of
+    # the question.
     if not candidates:
         return GroundingVerdict(sufficient=False, reason="no_candidates", metrics={"num_candidates": 0})
-
-    passing = [c for c in candidates if c.score >= min_score]
-    if len(passing) < min_candidates:
-        return GroundingVerdict(
-            sufficient=False,
-            reason="below_score_threshold",
-            metrics={
-                "num_passing": len(passing),
-                "num_required": min_candidates,
-                "best_score": max(c.score for c in candidates),
-                "min_score": min_score,
-            },
-        )
-
-    terms = significant_terms(query)
-    coverage = term_coverage(terms, " ".join(c.content for c in passing))
-    if coverage < min_keyword_coverage:
-        return GroundingVerdict(
-            sufficient=False,
-            reason="low_keyword_coverage",
-            metrics={
-                "keyword_coverage": coverage,
-                "min_keyword_coverage": min_keyword_coverage,
-                "query_terms": terms,
-            },
-        )
-
     return GroundingVerdict(
         sufficient=True,
         reason="ok",
-        passing_candidates=passing,
-        metrics={
-            "num_passing": len(passing),
-            "best_score": max(c.score for c in passing),
-            "keyword_coverage": coverage,
-        },
+        passing_candidates=candidates,
+        metrics={"num_candidates": len(candidates), "best_score": max(c.score for c in candidates)},
     )

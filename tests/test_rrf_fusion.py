@@ -21,8 +21,7 @@ def test_chunk_ranked_first_in_all_lists_scores_highest():
 
 
 def test_agreement_across_sources_beats_a_single_top_rank():
-    # chunk 2 is #1 in exactly one list; chunk 3 is #2 in all three lists.
-    # RRF should favor consistent agreement over a single first-place finish.
+    # chunk 2 is #1 in one list; chunk 3 is #2 in all three lists.
     fused = reciprocal_rank_fusion(
         {
             "bm25": [_c(2), _c(3)],
@@ -36,7 +35,7 @@ def test_agreement_across_sources_beats_a_single_top_rank():
 def test_scores_are_normalized_between_zero_and_one():
     fused = reciprocal_rank_fusion({"bm25": [_c(1), _c(2), _c(3)]})
     assert all(0.0 <= c.score <= 1.0 for c in fused)
-    assert fused[0].score == 1.0  # sole list, ranked #1 -> the theoretical max
+    assert fused[0].score == 1.0
 
 
 def test_respects_top_n():

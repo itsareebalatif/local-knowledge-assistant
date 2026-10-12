@@ -1,13 +1,3 @@
-"""Builds the knowledge graph for a newly ingested chunk (FR-2.1, FR-2.2).
-
-spaCy extracts entities from the chunk's text (no LLM); every entity gets an
-EntityNode row (deduped by name+type), a chunk_entity_junction row links it
-to this chunk, and every pair of entities that co-occurred in the chunk gets
-a RelationEdge (or has its weight bumped if that edge already exists). The
-same is mirrored into the in-memory NetworkX graph so both stay in sync —
-SQL for durable, queryable storage; NetworkX for fast in-process traversal.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -74,8 +64,6 @@ def build_graph_for_chunk(
     extractor: SpacyEntityExtractor,
     chunk: Chunk,
 ) -> list[EntityNode]:
-    """Extract entities from one chunk, link them to it, and connect every
-    pair that co-occurred — in both the SQL tables and the in-memory graph."""
     found = extractor.extract(chunk.content)
     if not found:
         return []

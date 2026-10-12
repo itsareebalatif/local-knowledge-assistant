@@ -1,8 +1,3 @@
-"""LLM backend factory — picks Ollama (local, default), Groq, or Gemini
-(both opt-in cloud) based on Settings.llm_backend, so the rest of the app
-depends only on the LLMBackend interface, never a specific provider.
-"""
-
 from __future__ import annotations
 
 from app.config import get_settings

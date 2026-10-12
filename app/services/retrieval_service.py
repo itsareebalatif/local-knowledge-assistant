@@ -1,19 +1,3 @@
-"""Pipeline 1: Independent Retrieval Pipeline (FR-4.5).
-
-Runs BM25, vector, and graph-expansion search concurrently (asyncio.gather —
-genuine parallelism, not one after another), fuses the three ranked lists
-with RRF, optionally reranks and/or diversifies the result (MMR), then runs
-the context sufficiency / grounding gate before anything reaches an LLM.
-Returns a status-tagged RetrievalOutcome — same convention as
-IngestOutcome — never raises for a "no good context found" case, since
-that's an expected, not exceptional, outcome.
-
-Each stage is wrapped in a Langfuse observation (app/observability) when
-tracing is enabled, nested under whatever trace the caller already started
-(query_routes.py / cli.py) — this function creates no root span of its own,
-since "one query" is the caller's unit of work, not this pipeline's.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -86,14 +70,7 @@ async def retrieve_and_verify(
 ) -> RetrievalOutcome:
     settings = get_settings()
 
-    # user_id is threaded into all three sources — this is Pipeline 1's half
-    # of per-user data isolation (the other half is chunk_routes.py's
-    # ownership check on citation lookups). Nothing here is optional: a
-    # missing user_id would mean a query could surface another user's chunks.
-    # Each wrapped in its own retriever observation (see _traced_* above) —
-    # asyncio.Task snapshots the active trace context at creation time, so
-    # these three nest correctly under the caller's span despite running
-    # concurrently, not sequentially.
+    # user_id is required on all three sources for per-user data isolation
     bm25_hits, vector_hits, graph_hits = await asyncio.gather(
         _traced_bm25(db, query, settings.bm25_top_k, user_id),
         _traced_vector(embedder, vector_store, query, settings.vector_top_k, user_id),
@@ -112,23 +89,15 @@ async def retrieve_and_verify(
         update(obs, output={"fused_count": len(fused), "chunk_ids": _chunk_ids(fused)})
 
     if reranker is not None and fused:
-        # When MMR will also run, don't truncate here — leave the full
-        # pool intact so MMR has a real set of candidates to pick a
-        # diverse subset from, rather than reselecting from a handful
-        # reranking already narrowed down to.
+        # Don't truncate here when MMR will also run, so MMR gets the full pool to pick from
         rerank_pool_size = len(fused) if settings.mmr_enabled else settings.rerank_top_k
         with observe("rerank", input={"candidate_count": len(fused), "model": settings.rerank_model}) as obs:
-            # CPU-bound model inference, not I/O — to_thread keeps it from
-            # blocking the event loop, same reasoning as bm25_search above.
             fused = await asyncio.to_thread(reranker.rerank, query, fused, rerank_pool_size)
             update(obs, output={"chunk_ids": _chunk_ids(fused), "scores": [round(c.score, 4) for c in fused]})
 
     if settings.mmr_enabled and fused:
         with observe("mmr-selection", input={"candidate_count": len(fused), "lambda": settings.mmr_lambda}) as obs:
-            # Re-embeds the candidate texts themselves (not the query) so MMR
-            # can measure how similar candidates are to each other — a
-            # different question than how similar each one is to the query,
-            # which fusion/reranking already answered via candidate.score.
+            # Re-embeds candidates (not the query) so MMR can measure candidate-to-candidate similarity
             with observe(
                 "embed-candidates", as_type="embedding", model=embedder.model, input={"num_texts": len(fused)}
             ) as embed_obs:

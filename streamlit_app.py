@@ -1,22 +1,8 @@
-"""Streamlit chat frontend for the Personal Knowledge Engine.
-
-A second, separate frontend alongside the existing vanilla HTML/JS dashboard
-(app/static/) — not a replacement. Talks to the FastAPI backend purely over
-HTTP, same as that dashboard does, never imports backend code directly: this
-is a genuinely separate process, run with `streamlit run streamlit_app.py`
-while `uvicorn app.main:app` runs separately.
-
-Scope, stated plainly: this covers login/register, file upload, and the
-chat interface with live streaming + citations + grounding — the things
-that make something "look like a chatbot." It does not reimplement the
-graph visualization; that stays on the HTML dashboard, since Streamlit has
-no native equivalent to the D3 force-directed graph there.
-"""
-
 from __future__ import annotations
 
 import json
 import os
+import time
 
 import requests
 import streamlit as st
@@ -31,10 +17,6 @@ def auth_headers() -> dict:
 
 
 def try_refresh_token() -> bool:
-    """Trades the stored refresh token for a new access/refresh pair.
-    Returns False (without raising) on any failure — an expired or
-    already-used refresh token, or the API being unreachable — which the
-    caller treats as "this really does need a full re-login."."""
     if "refresh_token" not in st.session_state:
         return False
     try:
@@ -52,14 +34,6 @@ def try_refresh_token() -> bool:
 
 
 def api_request(method: str, path: str, timeout: int = 30, authed: bool = False, **kwargs) -> requests.Response:
-    """All HTTP calls to the API funnel through here so refresh-on-401 is
-    handled in exactly one place. `authed=True` attaches the current access
-    token; if the API comes back 401 (token expired), it's refreshed once
-    and the exact same request is retried — transparent to every caller,
-    including the streaming query call (stream=True survives in **kwargs
-    since the retry re-issues the request from scratch, never reusing a
-    partially-read body)."""
-
     def _do() -> requests.Response:
         headers = {**(kwargs.get("headers") or {}), **(auth_headers() if authed else {})}
         return requests.request(method, f"{API_BASE_URL}{path}", timeout=timeout, **{**kwargs, "headers": headers})
@@ -79,18 +53,13 @@ def api_get(path: str, timeout: int = 30, authed: bool = True, **kwargs) -> requ
 
 
 def _handle_expired_session() -> None:
-    # Reaching here means even the refresh token didn't work (expired or
-    # already used) — api_request already tried a silent refresh, so this
-    # really is "log in again," not a transient blip.
-    for key in ("token", "refresh_token", "email", "messages"):
+    # The silent refresh already failed, so a full re-login is needed.
+    for key in ("token", "refresh_token", "email", "messages", "conversation_id"):
         st.session_state.pop(key, None)
     st.warning("Your session expired — please log in again.")
     st.rerun()
 
 
-# ---------------------------------------------------------------------
-# Auth: login/register in the sidebar, nothing else usable until logged in.
-# ---------------------------------------------------------------------
 def render_auth_sidebar() -> None:
     with st.sidebar:
         st.header("Account")
@@ -102,7 +71,7 @@ def render_auth_sidebar() -> None:
                     api_post("/api/auth/logout", authed=True)
                 except requests.RequestException:
                     pass  # logging out locally still happens even if the request itself fails
-                for key in ("token", "refresh_token", "email", "messages"):
+                for key in ("token", "refresh_token", "email", "messages", "conversation_id"):
                     st.session_state.pop(key, None)
                 st.rerun()
             return
@@ -116,6 +85,13 @@ def render_auth_sidebar() -> None:
                 if st.form_submit_button("Log in", use_container_width=True):
                     _submit_auth("/api/auth/login", {"email": email, "password": password})
 
+            with st.expander("Forgot password?"):
+                st.caption("Enter your account email and we'll send you a link to reset it.")
+                with st.form("forgot_password_form"):
+                    reset_email = st.text_input("Email", key="forgot_password_email")
+                    if st.form_submit_button("Send reset link", use_container_width=True):
+                        _submit_forgot_password(reset_email)
+
         with register_tab:
             with st.form("register_form"):
                 full_name = st.text_input("Full name")
@@ -125,6 +101,65 @@ def render_auth_sidebar() -> None:
                     _submit_auth(
                         "/api/auth/register", {"email": email, "password": password, "full_name": full_name}
                     )
+
+
+def _submit_forgot_password(email: str) -> None:
+    if not email:
+        st.warning("Enter your email first.")
+        return
+    try:
+        response = api_post("/api/auth/forgot-password", json={"email": email})
+    except requests.RequestException as exc:
+        st.error(f"Could not reach the API at {API_BASE_URL}: {exc}")
+        return
+    # Always 200 regardless of whether the account exists, to avoid leaking that info.
+    if response.status_code == 200:
+        st.success(response.json().get("message", "If that email has an account, a reset link is on its way."))
+    else:
+        detail = response.json().get("detail", response.text) if response.content else response.text
+        st.error(detail)
+
+
+def render_reset_password_page(token: str) -> None:
+    _left, center, _right = st.columns([1, 2, 1])
+    with center:
+        st.markdown(
+            "<div style='text-align: center; margin-top: 2rem;'>"
+            "<div style='font-size: 2rem;'>🧠</div>"
+            "<h2 style='margin-bottom: 0;'>Reset your password</h2>"
+            "<p style='color: #6b7280;'>Choose a new password for your Personal Knowledge Engine account.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        with st.form("reset_password_form"):
+            new_password = st.text_input("New password (8+ characters)", type="password")
+            confirm_password = st.text_input("Confirm new password", type="password")
+            submitted = st.form_submit_button("Reset password", use_container_width=True)
+
+        if not submitted:
+            return
+        if new_password != confirm_password:
+            st.error("Passwords don't match.")
+            return
+        if len(new_password) < 8:
+            st.error("Password must be at least 8 characters.")
+            return
+
+        try:
+            response = api_post("/api/auth/reset-password", json={"token": token, "new_password": new_password})
+        except requests.RequestException as exc:
+            st.error(f"Could not reach the API at {API_BASE_URL}: {exc}")
+            return
+
+        if response.status_code == 200:
+            st.success("Password reset. You can now log in with your new password.")
+            st.query_params.clear()
+            if st.button("Go to login", use_container_width=True):
+                st.rerun()
+        else:
+            detail = response.json().get("detail", response.text) if response.content else response.text
+            st.error(f"{detail} — the link may have expired or already been used. Request a new one from the login page.")
 
 
 def _submit_auth(path: str, payload: dict) -> None:
@@ -146,9 +181,6 @@ def _submit_auth(path: str, payload: dict) -> None:
     st.rerun()
 
 
-# ---------------------------------------------------------------------
-# Document upload — sidebar, only shown once logged in.
-# ---------------------------------------------------------------------
 def render_upload_sidebar() -> None:
     with st.sidebar:
         st.header("Documents")
@@ -187,12 +219,6 @@ def render_upload_sidebar() -> None:
                     st.error(data.get("error") or status)
 
 
-# ---------------------------------------------------------------------
-# Document list — "what have I actually uploaded, and how much of it."
-# Streamlit reruns this whole script on every interaction, so fetching
-# fresh here is enough to pick up a just-finished ingest above — no
-# separate refresh hook needed.
-# ---------------------------------------------------------------------
 def render_documents_sidebar() -> None:
     with st.sidebar:
         st.header("Your documents")
@@ -212,25 +238,50 @@ def render_documents_sidebar() -> None:
         data = response.json()
         st.caption(f"{data['total_documents']} document(s), {data['total_chunks']} chunk(s) total")
         for doc in data["documents"]:
-            st.text(f"{doc['file_name']} — {doc['chunk_count']} chunks")
+            col_name, col_delete = st.columns([5, 1])
+            col_name.text(f"{doc['file_name']} — {doc['chunk_count']} chunks")
+            # key=doc_id keeps each row's button/confirm state independent.
+            if col_delete.button("🗑️", key=f"delete_{doc['doc_id']}", help="Delete this document"):
+                st.session_state[f"confirm_delete_{doc['doc_id']}"] = True
+
+            if st.session_state.get(f"confirm_delete_{doc['doc_id']}"):
+                st.warning(f"Delete **{doc['file_name']}** and all its chunks/embeddings? This can't be undone.")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button("Delete", key=f"confirm_{doc['doc_id']}", use_container_width=True):
+                    _delete_document(doc["doc_id"])
+                if cancel_col.button("Cancel", key=f"cancel_{doc['doc_id']}", use_container_width=True):
+                    del st.session_state[f"confirm_delete_{doc['doc_id']}"]
+                    st.rerun()
 
 
-# ---------------------------------------------------------------------
-# Chat — streams tokens live via POST /api/query/stream, same SSE wire
-# format the HTML dashboard's hand-parsed fetch() reader consumes; here
-# it's requests' iter_lines() feeding a generator straight into
-# st.chat_message(...).write_stream(), which is what gives the live
-# token-by-token "typing" effect.
-# ---------------------------------------------------------------------
+def _delete_document(doc_id: int) -> None:
+    try:
+        response = api_request("DELETE", f"/api/documents/{doc_id}", authed=True)
+    except requests.RequestException as exc:
+        st.error(f"Could not reach the API: {exc}")
+        return
+
+    if response.status_code == 401:
+        _handle_expired_session()
+        return
+
+    st.session_state.pop(f"confirm_delete_{doc_id}", None)
+    if response.status_code == 200:
+        st.success("Document deleted.")
+        st.rerun()
+    else:
+        detail = response.json().get("detail", response.text) if response.content else response.text
+        st.error(detail)
+
+
 def stream_answer(question: str):
-    """Returns (generator_of_text_pieces, final_event_holder). The caller
-    must fully consume the generator (e.g. via st.write_stream) before
-    final_event_holder is populated — it's filled as a side effect of
-    iterating the stream, not available up front."""
+    # final_event is populated as a side effect of consuming the generator,
+    # so it's only valid once the caller has fully iterated it.
     final_event: dict = {}
 
     def _generate():
-        response = api_post("/api/query/stream", json={"query": question}, authed=True, stream=True, timeout=120)
+        payload = {"query": question, "conversation_id": st.session_state.get("conversation_id")}
+        response = api_post("/api/query/stream", json=payload, authed=True, stream=True, timeout=120)
         if response.status_code == 401:
             final_event["type"] = "session_expired"
             return
@@ -240,11 +291,21 @@ def stream_answer(question: str):
                 continue
             event = json.loads(line[len("data:") :].strip())
             if event["type"] == "token":
+                # Purely cosmetic pacing; tokens actually arrive much faster.
+                time.sleep(0.018)
                 yield event["text"]
             else:
                 final_event.update(event)
 
     return _generate(), final_event
+
+
+def _refusal_message(reason: str | None) -> str:
+    if reason == "no_candidates":
+        return "I couldn't find anything in your documents related to that. Try rephrasing, or upload a document that covers this topic."
+    if reason == "low_keyword_coverage":
+        return "I don't have enough information in your documents to answer that confidently. Try rephrasing using wording closer to what's actually in the document, or ask about something more specific."
+    return "I don't have enough grounded information in your documents to answer that."
 
 
 def render_citations(citations: list[dict]) -> None:
@@ -259,12 +320,111 @@ def render_citations(citations: list[dict]) -> None:
 def render_grounding(grounding: dict | None) -> None:
     if not grounding:
         return
-    coverage = grounding.get("overall_coverage", 0.0)
+    coverage = grounding.get("overall_coverage")
+    if coverage is None:
+        st.caption("No factual claims to verify.")
+        return
     unsupported = grounding.get("unsupported_sentences", [])
     caption = f"Grounding coverage: {coverage:.0%}"
     if unsupported:
         caption += f" — ⚠️ {len(unsupported)} sentence(s) not clearly supported by sources"
     st.caption(caption)
+
+
+def render_history_sidebar() -> None:
+    with st.sidebar:
+        st.header("Chat history")
+
+        if st.button("➕ New chat", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.conversation_id = None
+            st.rerun()
+
+        try:
+            response = api_get("/api/conversations")
+        except requests.RequestException as exc:
+            st.caption(f"Could not load history: {exc}")
+            return
+        if response.status_code == 401:
+            _handle_expired_session()
+            return
+        if response.status_code != 200:
+            st.caption("Could not load history.")
+            return
+
+        conversations = response.json()["conversations"]
+        if not conversations:
+            st.caption("No chats yet.")
+
+        active_id = st.session_state.get("conversation_id")
+        for conv in conversations:
+            col_title, col_delete = st.columns([5, 1])
+            label = ("➡️ " if conv["conversation_id"] == active_id else "") + conv["title"]
+            if col_title.button(label, key=f"open_conv_{conv['conversation_id']}", use_container_width=True):
+                _load_conversation(conv["conversation_id"])
+            if col_delete.button("🗑️", key=f"delete_conv_{conv['conversation_id']}", help="Delete this chat"):
+                st.session_state[f"confirm_delete_conv_{conv['conversation_id']}"] = True
+
+            if st.session_state.get(f"confirm_delete_conv_{conv['conversation_id']}"):
+                st.warning(f"Delete **{conv['title']}**? This can't be undone.")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "Delete", key=f"confirm_delete_conv_btn_{conv['conversation_id']}", use_container_width=True
+                ):
+                    _delete_conversation(conv["conversation_id"])
+                if cancel_col.button(
+                    "Cancel", key=f"cancel_delete_conv_{conv['conversation_id']}", use_container_width=True
+                ):
+                    del st.session_state[f"confirm_delete_conv_{conv['conversation_id']}"]
+                    st.rerun()
+
+
+def _load_conversation(conversation_id: int) -> None:
+    try:
+        response = api_get(f"/api/conversations/{conversation_id}")
+    except requests.RequestException as exc:
+        st.error(f"Could not reach the API: {exc}")
+        return
+    if response.status_code == 401:
+        _handle_expired_session()
+        return
+    if response.status_code != 200:
+        st.error("Could not load that chat.")
+        return
+
+    data = response.json()
+    st.session_state.conversation_id = data["conversation_id"]
+    st.session_state.messages = [
+        {
+            "role": m["role"],
+            "content": m["content"],
+            "citations": m.get("citations") or [],
+            "grounding": m.get("grounding"),
+        }
+        for m in data["messages"]
+    ]
+    st.rerun()
+
+
+def _delete_conversation(conversation_id: int) -> None:
+    try:
+        response = api_request("DELETE", f"/api/conversations/{conversation_id}", authed=True)
+    except requests.RequestException as exc:
+        st.error(f"Could not reach the API: {exc}")
+        return
+    if response.status_code == 401:
+        _handle_expired_session()
+        return
+
+    st.session_state.pop(f"confirm_delete_conv_{conversation_id}", None)
+    if response.status_code == 200:
+        if st.session_state.get("conversation_id") == conversation_id:
+            st.session_state.conversation_id = None
+            st.session_state.messages = []
+        st.rerun()
+    else:
+        detail = response.json().get("detail", response.text) if response.content else response.text
+        st.error(detail)
 
 
 def render_chat() -> None:
@@ -302,9 +462,13 @@ def render_chat() -> None:
             st.session_state.messages.pop()  # drop the user message we just added — it was never answered
             _handle_expired_session()
             return
-        elif event_type == "refused":
-            st.warning(f"No grounded answer available (reason: {final_event.get('reason')}).")
-            st.session_state.messages.append({"role": "assistant", "content": "*(refused — no grounded context found)*"})
+
+        st.session_state.conversation_id = final_event.get("conversation_id")
+
+        if event_type == "refused":
+            message = _refusal_message(final_event.get("reason"))
+            st.markdown(message)
+            st.session_state.messages.append({"role": "assistant", "content": message})
         elif event_type == "error":
             st.error(final_event.get("message", "Unknown error."))
             st.session_state.messages.append({"role": "assistant", "content": "*(error during generation)*"})
@@ -318,12 +482,16 @@ def render_chat() -> None:
             )
 
 
-# ---------------------------------------------------------------------
-render_auth_sidebar()
-
-if "token" not in st.session_state:
-    st.info("Log in or register in the sidebar to get started.")
+_reset_token = st.query_params.get("token")
+if _reset_token:
+    render_reset_password_page(_reset_token)
 else:
-    render_upload_sidebar()
-    render_documents_sidebar()
-    render_chat()
+    render_auth_sidebar()
+
+    if "token" not in st.session_state:
+        st.info("Log in or register in the sidebar to get started.")
+    else:
+        render_history_sidebar()
+        render_upload_sidebar()
+        render_documents_sidebar()
+        render_chat()

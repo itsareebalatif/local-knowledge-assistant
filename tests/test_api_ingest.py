@@ -38,7 +38,7 @@ def test_ingest_endpoint_returns_ingested_status(
         body = response.json()
         assert body["status"] == "ingested"
         assert body["total_chunks"] >= 1
-        assert (tmp_path / "graph.json").exists()  # graph persisted to disk after a successful ingest
+        assert (tmp_path / "graph.json").exists()
     finally:
         app.dependency_overrides.clear()
 
@@ -64,9 +64,7 @@ def test_ingest_requires_authentication(db_session, fake_embedder, fake_vector_s
     _override_all(db_session, fake_embedder, fake_vector_store, CooccurrenceGraphBuilder(), SpacyEntityExtractor())
     try:
         client = TestClient(app)
-        response = client.post(
-            "/api/ingest", files={"file": ("notes.md", b"hello", "text/markdown")}
-        )  # no Authorization header
+        response = client.post("/api/ingest", files={"file": ("notes.md", b"hello", "text/markdown")})
         assert response.status_code == 401
     finally:
         app.dependency_overrides.clear()

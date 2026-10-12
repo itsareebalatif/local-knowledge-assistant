@@ -8,11 +8,14 @@ from app.auth.auth_service import (
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,
     InvalidRefreshTokenError,
+    InvalidResetTokenError,
     get_user_by_token,
     login_user,
     logout_user,
     refresh_access_token,
     register_user,
+    request_password_reset,
+    reset_password,
 )
 from app.auth.password import hash_password, verify_password
 from app.auth.tokens import generate_token, hash_token
@@ -72,7 +75,7 @@ def test_login_user_with_correct_password_issues_a_new_token(db_session):
     logged_in = login_user(db_session, "login@example.com", "correct horse battery staple")
 
     assert logged_in.user.user_id == registered.user.user_id
-    assert logged_in.access_token != registered.access_token  # a fresh token, not the registration one reused
+    assert logged_in.access_token != registered.access_token
     assert get_user_by_token(db_session, logged_in.access_token) is not None
 
 
@@ -102,7 +105,7 @@ def test_login_invalidates_the_previous_token(db_session):
 
     login_user(db_session, "rotate@example.com", "correct horse battery staple")
 
-    assert get_user_by_token(db_session, registered.access_token) is None  # old token no longer resolves
+    assert get_user_by_token(db_session, registered.access_token) is None
 
 
 def test_logout_invalidates_the_token(db_session):
@@ -122,8 +125,6 @@ def test_get_user_by_token_returns_none_once_the_token_has_expired(db_session):
     registered = register_user(db_session, "expiring@example.com", "correct horse battery staple", "User")
     assert get_user_by_token(db_session, registered.access_token) is not None
 
-    # Simulate time passing without needing a real sleep or a mocked clock —
-    # rewind the stored expiry straight into the past instead.
     registered.user.auth.access_token_expires_at = utcnow() - datetime.timedelta(seconds=1)
     db_session.commit()
 
@@ -147,7 +148,7 @@ def test_refresh_access_token_rotates_the_refresh_token_invalidating_the_old_one
     refresh_access_token(db_session, registered.refresh_token)
 
     with pytest.raises(InvalidRefreshTokenError):
-        refresh_access_token(db_session, registered.refresh_token)  # already used once — can't be replayed
+        refresh_access_token(db_session, registered.refresh_token)
 
 
 def test_refresh_access_token_rejects_an_unknown_token(db_session):
@@ -181,3 +182,83 @@ def test_logout_invalidates_both_the_access_and_refresh_tokens(db_session):
     assert get_user_by_token(db_session, registered.access_token) is None
     with pytest.raises(InvalidRefreshTokenError):
         refresh_access_token(db_session, registered.refresh_token)
+
+
+def test_request_password_reset_returns_a_token_for_a_real_active_account(db_session):
+    registered = register_user(db_session, "reset-req@example.com", "correct horse battery staple", "User")
+
+    result = request_password_reset(db_session, "reset-req@example.com")
+
+    assert result is not None
+    user, token = result
+    assert user.user_id == registered.user.user_id
+    assert token
+
+
+def test_request_password_reset_returns_none_for_an_unknown_email(db_session):
+    assert request_password_reset(db_session, "nobody@example.com") is None
+
+
+def test_request_password_reset_returns_none_for_an_inactive_account(db_session):
+    registered = register_user(db_session, "inactive-reset@example.com", "correct horse battery staple", "User")
+    registered.user.is_active = False
+    db_session.commit()
+
+    assert request_password_reset(db_session, "inactive-reset@example.com") is None
+
+
+def test_reset_password_with_a_valid_token_changes_the_password(db_session):
+    register_user(db_session, "reset-ok@example.com", "old password here", "User")
+    _, token = request_password_reset(db_session, "reset-ok@example.com")
+
+    reset_password(db_session, token, "brand new password")
+
+    with pytest.raises(InvalidCredentialsError):
+        login_user(db_session, "reset-ok@example.com", "old password here")
+    login_user(db_session, "reset-ok@example.com", "brand new password")
+
+
+def test_reset_password_rejects_an_unknown_token(db_session):
+    with pytest.raises(InvalidResetTokenError):
+        reset_password(db_session, "totally-made-up", "brand new password")
+
+
+def test_reset_password_rejects_an_expired_token(db_session):
+    register_user(db_session, "reset-expired@example.com", "old password here", "User")
+    user, token = request_password_reset(db_session, "reset-expired@example.com")
+    user.auth.reset_token_expires_at = utcnow() - datetime.timedelta(seconds=1)
+    db_session.commit()
+
+    with pytest.raises(InvalidResetTokenError):
+        reset_password(db_session, token, "brand new password")
+
+
+def test_reset_password_token_cannot_be_reused(db_session):
+    register_user(db_session, "reset-reuse@example.com", "old password here", "User")
+    _, token = request_password_reset(db_session, "reset-reuse@example.com")
+
+    reset_password(db_session, token, "first new password")
+
+    with pytest.raises(InvalidResetTokenError):
+        reset_password(db_session, token, "second new password")
+
+
+def test_reset_password_invalidates_existing_access_and_refresh_tokens(db_session):
+    registered = register_user(db_session, "reset-sessions@example.com", "old password here", "User")
+    _, token = request_password_reset(db_session, "reset-sessions@example.com")
+
+    reset_password(db_session, token, "brand new password")
+
+    assert get_user_by_token(db_session, registered.access_token) is None
+    with pytest.raises(InvalidRefreshTokenError):
+        refresh_access_token(db_session, registered.refresh_token)
+
+
+def test_a_new_reset_request_invalidates_the_previous_token(db_session):
+    register_user(db_session, "reset-rotate@example.com", "old password here", "User")
+    _, first_token = request_password_reset(db_session, "reset-rotate@example.com")
+    _, second_token = request_password_reset(db_session, "reset-rotate@example.com")
+
+    with pytest.raises(InvalidResetTokenError):
+        reset_password(db_session, first_token, "brand new password")
+    reset_password(db_session, second_token, "brand new password")

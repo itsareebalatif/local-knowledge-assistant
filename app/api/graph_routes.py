@@ -1,21 +1,3 @@
-"""Graph inspection endpoints (SRS 1.4: "fetch graph relationships").
-
-GET /graph returns the full co-occurrence graph as adjacency data (the same
-shape CooccurrenceGraphBuilder.save()/load() already use — reusing it here
-rather than inventing a second JSON shape for the same graph).
-
-GET /graph/neighbors is the more commonly useful call: 1-hop neighbors of
-one named entity, with the co-occurrence weight connecting them — the same
-traversal app.graph.graph_expansion uses internally during retrieval, now
-inspectable directly for debugging "why did the graph pull in chunk X".
-
-Both require login but the graph structure itself is NOT filtered per user:
-entities and co-occurrence edges are shared structure (what concepts relate
-to what), not document content — the actual chunk text behind a node stays
-protected by chunk_routes.py's ownership check and retrieval's user_id
-filters. This is a deliberate scope line, not an oversight.
-"""
-
 from __future__ import annotations
 
 import networkx as nx

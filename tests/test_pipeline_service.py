@@ -18,14 +18,14 @@ async def test_full_pipeline_embeds_and_builds_graph(db_session, user, fake_embe
     )
 
     assert outcome.status == "ingested"
-    assert len(fake_embedder.calls) == 1  # one batch call, not one per chunk
+    assert len(fake_embedder.calls) == 1
 
     chunks = db_session.execute(select(Chunk).where(Chunk.doc_id == outcome.document_id)).scalars().all()
     assert all(c.embedding_id is not None for c in chunks)
     assert all(c.embedding_id in fake_vector_store.records for c in chunks)
 
     junctions = db_session.execute(select(ChunkEntityJunction)).scalars().all()
-    assert len(junctions) > 0  # entities were actually linked to chunks
+    assert len(junctions) > 0
     assert graph_builder.graph.number_of_nodes() > 0
 
 
@@ -48,5 +48,5 @@ async def test_pipeline_skips_embed_and_graph_for_duplicate_file(
     )
 
     assert second.status == "duplicate_file"
-    assert len(fake_embedder.calls) == calls_after_first  # no new embedding calls
-    assert graph_builder.graph.number_of_nodes() == nodes_after_first  # no new graph work
+    assert len(fake_embedder.calls) == calls_after_first
+    assert graph_builder.graph.number_of_nodes() == nodes_after_first

@@ -68,7 +68,7 @@ def test_get_graph_requires_authentication(db_session):
     _override(db_session, CooccurrenceGraphBuilder())
     try:
         client = TestClient(app)
-        response = client.get("/api/graph")  # no Authorization header
+        response = client.get("/api/graph")
         assert response.status_code == 401
     finally:
         app.dependency_overrides.clear()

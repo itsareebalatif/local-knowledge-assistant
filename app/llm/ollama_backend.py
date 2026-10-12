@@ -1,11 +1,3 @@
-"""Local LLM backend via Ollama's /api/chat streaming endpoint (FR-4.5).
-
-Talks to the same local Ollama server as app/embeddings/embedder.py — no
-API key, nothing leaves the machine. Ollama streams newline-delimited JSON
-objects, one per generated piece, ending with a final object where
-`"done": true`.
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,6 +23,7 @@ class OllamaLLM(LLMBackend):
         self._transport = transport
 
     async def generate_stream(self, system_prompt: str, user_prompt: str):
+        settings = get_settings()
         payload = {
             "model": self.model,
             "messages": [
@@ -38,6 +31,8 @@ class OllamaLLM(LLMBackend):
                 {"role": "user", "content": user_prompt},
             ],
             "stream": True,
+            # Ollama nests temperature/seed under "options", unlike Groq/Gemini's top-level fields.
+            "options": {"temperature": settings.llm_temperature, "seed": settings.llm_seed},
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
