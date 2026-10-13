@@ -26,5 +26,5 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-    auth: Mapped["UserAuth"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    documents: Mapped[list["Document"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    auth: Mapped[UserAuth] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    documents: Mapped[list[Document]] = relationship(back_populates="owner", cascade="all, delete-orphan")

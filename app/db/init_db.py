@@ -5,10 +5,9 @@ import logging
 
 from sqlalchemy import inspect, text
 
+from app import models  # noqa: F401
 from app.db.base import Base, engine
 from app.db.fts import create_fts_index
-
-from app import models  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

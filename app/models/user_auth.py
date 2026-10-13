@@ -34,4 +34,4 @@ class UserAuth(Base):
     )
     last_login_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user: Mapped["User"] = relationship(back_populates="auth")
+    user: Mapped[User] = relationship(back_populates="auth")

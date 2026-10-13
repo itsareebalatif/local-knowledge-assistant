@@ -28,8 +28,8 @@ class Chunk(Base):
     # Foreign identifier pointing at the vector-store record (Chroma/FAISS id).
     embedding_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    document: Mapped["Document"] = relationship(back_populates="chunks")
-    entity_links: Mapped[list["ChunkEntityJunction"]] = relationship(
+    document: Mapped[Document] = relationship(back_populates="chunks")
+    entity_links: Mapped[list[ChunkEntityJunction]] = relationship(
         back_populates="chunk", cascade="all, delete-orphan"
     )
 

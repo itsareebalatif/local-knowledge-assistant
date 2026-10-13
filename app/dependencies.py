@@ -16,14 +16,14 @@ from app.models import User
 from app.search.reranker import Reranker
 
 __all__ = [
+    "get_current_user",
     "get_db",
     "get_embedder",
-    "get_vector_store",
-    "get_graph_builder",
     "get_entity_extractor",
+    "get_graph_builder",
     "get_llm",
     "get_reranker",
-    "get_current_user",
+    "get_vector_store",
 ]
 
 

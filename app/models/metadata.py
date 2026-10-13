@@ -22,4 +22,4 @@ class DocumentMetadata(Base):
     key: Mapped[str] = mapped_column(String(128), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
-    document: Mapped["Document"] = relationship(back_populates="metadata_entries")
+    document: Mapped[Document] = relationship(back_populates="metadata_entries")

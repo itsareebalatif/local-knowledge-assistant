@@ -45,7 +45,7 @@ async def ingest_bytes(file_bytes: bytes, filename: str, max_tokens: int = DEFAU
     except IngestionError as exc:
         logger.warning("Failed to ingest %s (%s): %s", filename, file_type, exc)
         return IngestResult(filename=filename, file_type=file_type, ok=False, error=str(exc))
-    except Exception as exc:  # noqa: BLE001 - a single bad file must never kill the batch
+    except Exception as exc:
         logger.exception("Unexpected error ingesting %s (%s)", filename, file_type)
         return IngestResult(filename=filename, file_type=file_type, ok=False, error=f"Unexpected error: {exc}")
 

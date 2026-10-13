@@ -8,7 +8,7 @@ invocation.
 
 from __future__ import annotations
 
-from app.evaluation.benchmark_latency import LatencyReport, _percentile, benchmark_vector_query_latency
+from app.evaluation.benchmark_latency import _percentile, benchmark_vector_query_latency
 
 
 def test_percentile_never_exceeds_the_actual_max_with_few_samples():

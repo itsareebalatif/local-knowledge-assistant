@@ -31,7 +31,7 @@ engine = create_engine(settings.database_url, connect_args=connect_args, future=
 if settings.is_sqlite:
 
     @event.listens_for(Engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):  # noqa: ARG001
+    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
         # SQLite ignores FK constraints unless this pragma is set per-connection.
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")

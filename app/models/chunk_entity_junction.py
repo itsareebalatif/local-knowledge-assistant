@@ -23,5 +23,5 @@ class ChunkEntityJunction(Base):
         ForeignKey("entity_nodes.entity_id", ondelete="CASCADE"), primary_key=True, index=True
     )
 
-    chunk: Mapped["Chunk"] = relationship(back_populates="entity_links")
-    entity: Mapped["EntityNode"] = relationship(back_populates="chunk_links")
+    chunk: Mapped[Chunk] = relationship(back_populates="entity_links")
+    entity: Mapped[EntityNode] = relationship(back_populates="chunk_links")

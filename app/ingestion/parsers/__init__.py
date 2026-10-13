@@ -48,4 +48,4 @@ def get_parser(file_type: str) -> BaseParser:
         raise UnsupportedFileTypeError(f"No parser registered for file_type: {file_type!r}") from exc
 
 
-__all__ = ["get_parser", "file_type_for_filename", "EXTENSION_TO_FILE_TYPE"]
+__all__ = ["EXTENSION_TO_FILE_TYPE", "file_type_for_filename", "get_parser"]

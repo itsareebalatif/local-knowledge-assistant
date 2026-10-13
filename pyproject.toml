@@ -58,3 +58,24 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection system requires `Depends(...)` (and
+# Query/Path/Body/etc.) as an actual argument default — that's not the
+# mutable-default-argument bug B008 exists to catch, it's how FastAPI
+# resolves dependencies per-request. Without this, every route signature
+# in app/api/*.py (38 of them) flags as a false positive.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Security",
+]

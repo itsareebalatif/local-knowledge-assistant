@@ -28,11 +28,11 @@ class Document(Base):
     hash_checksum: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-    owner: Mapped["User"] = relationship(back_populates="documents")
-    metadata_entries: Mapped[list["DocumentMetadata"]] = relationship(
+    owner: Mapped[User] = relationship(back_populates="documents")
+    metadata_entries: Mapped[list[DocumentMetadata]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
-    chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list[Chunk]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
         # Same user re-uploading the identical file is a duplicate; different

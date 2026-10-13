@@ -14,7 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import IngestResponse
 from app.config import get_settings
-from app.dependencies import get_current_user, get_db, get_embedder, get_entity_extractor, get_graph_builder, get_vector_store
+from app.dependencies import (
+    get_current_user,
+    get_db,
+    get_embedder,
+    get_entity_extractor,
+    get_graph_builder,
+    get_vector_store,
+)
 from app.models import User
 from app.services.pipeline_service import ingest_index_and_graph
 

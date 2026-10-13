@@ -21,13 +21,13 @@ class EntityNode(Base):
     name: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     type: Mapped[str] = mapped_column(String(64), nullable=False)  # Person, Organization, Location, Concept, ...
 
-    chunk_links: Mapped[list["ChunkEntityJunction"]] = relationship(
+    chunk_links: Mapped[list[ChunkEntityJunction]] = relationship(
         back_populates="entity", cascade="all, delete-orphan"
     )
-    outgoing_edges: Mapped[list["RelationEdge"]] = relationship(
+    outgoing_edges: Mapped[list[RelationEdge]] = relationship(
         foreign_keys="RelationEdge.source_entity_id", back_populates="source_entity", cascade="all, delete-orphan"
     )
-    incoming_edges: Mapped[list["RelationEdge"]] = relationship(
+    incoming_edges: Mapped[list[RelationEdge]] = relationship(
         foreign_keys="RelationEdge.target_entity_id", back_populates="target_entity", cascade="all, delete-orphan"
     )
 

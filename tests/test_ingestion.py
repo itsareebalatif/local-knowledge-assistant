@@ -5,7 +5,6 @@ import pytest
 from app.ingestion.chunker import HeaderAwareChunker
 from app.ingestion.parsers.docx_parser import DocxParser
 from app.ingestion.parsers.html_parser import HtmlParser
-from app.ingestion.parsers.markdown_parser import MarkdownParser
 from app.ingestion.parsers.pdf_parser import PdfParser
 from app.ingestion.parsers.txt_parser import TxtParser
 from app.ingestion.pipeline import ingest_bytes, ingest_many

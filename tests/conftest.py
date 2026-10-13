@@ -19,9 +19,9 @@ def db_session():
     on (SQLite ignores foreign keys unless told otherwise, same as the real
     engine in app/db/base.py). Importing app.models registers every table on
     Base.metadata before create_all runs."""
+    from app import models  # noqa: F401 - registers tables on Base.metadata
     from app.db.base import Base
     from app.db.fts import create_fts_index
-    from app import models  # noqa: F401 - registers tables on Base.metadata
 
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool

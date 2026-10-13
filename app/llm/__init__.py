@@ -23,4 +23,4 @@ def get_llm_backend(name: str | None = None) -> LLMBackend:
     raise ValueError(f"Unknown LLM_BACKEND: {backend!r} — expected 'local', 'groq', or 'gemini'")
 
 
-__all__ = ["LLMBackend", "LLMError", "OllamaLLM", "GroqLLM", "GeminiLLM", "get_llm_backend"]
+__all__ = ["GeminiLLM", "GroqLLM", "LLMBackend", "LLMError", "OllamaLLM", "get_llm_backend"]

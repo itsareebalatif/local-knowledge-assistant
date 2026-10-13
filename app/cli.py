@@ -30,7 +30,6 @@ from app.search.reranker import CrossEncoderReranker
 from app.services.generation_service import generate_answer_stream
 from app.services.pipeline_service import ingest_index_and_graph
 from app.services.retrieval_service import retrieve_and_verify
-from app.services.user_service import DEFAULT_LOCAL_USER_EMAIL as _DEFAULT_LOCAL_USER_EMAIL
 from app.services.user_service import get_or_create_default_user as _get_or_create_default_user
 
 

@@ -15,12 +15,12 @@ from app.models.user import User
 from app.models.user_auth import UserAuth
 
 __all__ = [
-    "User",
-    "UserAuth",
-    "Document",
-    "DocumentMetadata",
     "Chunk",
     "ChunkEntityJunction",
+    "Document",
+    "DocumentMetadata",
     "EntityNode",
     "RelationEdge",
+    "User",
+    "UserAuth",
 ]

@@ -6,9 +6,9 @@ from app.search.vector_search import vector_search
 
 __all__ = [
     "CandidateChunk",
-    "bm25_search",
-    "vector_search",
-    "reciprocal_rank_fusion",
-    "evaluate_context_sufficiency",
     "GroundingVerdict",
+    "bm25_search",
+    "evaluate_context_sufficiency",
+    "reciprocal_rank_fusion",
+    "vector_search",
 ]

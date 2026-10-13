@@ -25,7 +25,7 @@ def test_list_documents_returns_only_the_current_users_documents(db_session, reg
         body = response.json()
         assert body["total_documents"] == 2
         assert body["total_chunks"] == 2
-        assert {d["chunk_count"] for d in body["documents"]} == {1, 1}
+        assert {d["chunk_count"] for d in body["documents"]} == {1}
         assert all("file_name" in d and "created_at" in d for d in body["documents"])
     finally:
         app.dependency_overrides.clear()

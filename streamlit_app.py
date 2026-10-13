@@ -109,22 +109,20 @@ def render_auth_sidebar() -> None:
 
         login_tab, register_tab = st.tabs(["Log in", "Register"])
 
-        with login_tab:
-            with st.form("login_form"):
-                email = st.text_input("Email")
-                password = st.text_input("Password", type="password")
-                if st.form_submit_button("Log in", use_container_width=True):
-                    _submit_auth("/api/auth/login", {"email": email, "password": password})
+        with login_tab, st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            if st.form_submit_button("Log in", use_container_width=True):
+                _submit_auth("/api/auth/login", {"email": email, "password": password})
 
-        with register_tab:
-            with st.form("register_form"):
-                full_name = st.text_input("Full name")
-                email = st.text_input("Email", key="register_email")
-                password = st.text_input("Password (8+ characters)", type="password", key="register_password")
-                if st.form_submit_button("Register", use_container_width=True):
-                    _submit_auth(
-                        "/api/auth/register", {"email": email, "password": password, "full_name": full_name}
-                    )
+        with register_tab, st.form("register_form"):
+            full_name = st.text_input("Full name")
+            email = st.text_input("Email", key="register_email")
+            password = st.text_input("Password (8+ characters)", type="password", key="register_password")
+            if st.form_submit_button("Register", use_container_width=True):
+                _submit_auth(
+                    "/api/auth/register", {"email": email, "password": password, "full_name": full_name}
+                )
 
 
 def _submit_auth(path: str, payload: dict) -> None:

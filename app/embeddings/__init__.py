@@ -17,4 +17,4 @@ def get_embedder_backend(name: str | None = None):
     raise ValueError(f"Unknown EMBEDDING_BACKEND: {backend!r} — expected 'ollama' or 'cohere'")
 
 
-__all__ = ["OllamaEmbedder", "CohereEmbedder", "EmbeddingError", "VectorStore", "ChromaVectorStore", "get_embedder_backend"]
+__all__ = ["ChromaVectorStore", "CohereEmbedder", "EmbeddingError", "OllamaEmbedder", "VectorStore", "get_embedder_backend"]

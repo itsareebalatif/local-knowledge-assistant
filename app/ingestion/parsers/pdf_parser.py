@@ -34,7 +34,7 @@ class PdfParser(BaseParser):
             return self._parse_with_pdfplumber(file_bytes)
         except ParsingError:
             raise
-        except Exception as plumber_error:
+        except Exception as plumber_error:  # noqa: BLE001 - deliberate: any pdfplumber failure falls back to pypdf
             try:
                 return self._parse_with_pypdf(file_bytes)
             except Exception as pypdf_error:
@@ -56,7 +56,7 @@ class PdfParser(BaseParser):
                 page_lines.append(self._extract_lines(page))
                 try:
                     page_tables.append(page.extract_tables())
-                except Exception:  # a broken table extractor shouldn't sink the whole page
+                except Exception:  # noqa: BLE001 - deliberate: a broken table extractor shouldn't sink the whole page
                     page_tables.append([])
                     warnings.append(f"Table extraction failed on page {page.page_number}")
 

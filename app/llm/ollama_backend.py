@@ -40,23 +40,25 @@ class OllamaLLM(LLMBackend):
             "stream": True,
         }
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
-                async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
-                    if response.status_code >= 400:
-                        body = await response.aread()
-                        raise LLMError(
-                            f"Ollama returned {response.status_code}: {body.decode(errors='replace')}. "
-                            f"Is the model pulled? (`ollama pull {self.model}`)"
-                        )
-                    async for line in response.aiter_lines():
-                        if not line.strip():
-                            continue
-                        data = json.loads(line)
-                        piece = data.get("message", {}).get("content", "")
-                        if piece:
-                            yield piece
-                        if data.get("done"):
-                            break
+            async with (
+                httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client,
+                client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response,
+            ):
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise LLMError(
+                        f"Ollama returned {response.status_code}: {body.decode(errors='replace')}. "
+                        f"Is the model pulled? (`ollama pull {self.model}`)"
+                    )
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    piece = data.get("message", {}).get("content", "")
+                    if piece:
+                        yield piece
+                    if data.get("done"):
+                        break
         except httpx.ConnectError as exc:
             raise LLMError(f"Could not reach Ollama at {self.base_url}. Is it running? (`ollama serve`)") from exc
         except httpx.TimeoutException as exc:

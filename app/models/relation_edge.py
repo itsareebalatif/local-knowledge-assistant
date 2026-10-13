@@ -26,10 +26,10 @@ class RelationEdge(Base):
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
 
-    source_entity: Mapped["EntityNode"] = relationship(
+    source_entity: Mapped[EntityNode] = relationship(
         foreign_keys=[source_entity_id], back_populates="outgoing_edges"
     )
-    target_entity: Mapped["EntityNode"] = relationship(
+    target_entity: Mapped[EntityNode] = relationship(
         foreign_keys=[target_entity_id], back_populates="incoming_edges"
     )
 

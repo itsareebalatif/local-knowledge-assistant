@@ -7,12 +7,12 @@ from app.services.retrieval_service import retrieve_and_verify
 from app.services.types import IngestOutcome, RetrievalOutcome
 
 __all__ = [
-    "ingest_document",
     "IngestOutcome",
-    "embed_pending_chunks",
+    "RetrievalOutcome",
     "build_graph_for_chunk",
+    "embed_pending_chunks",
+    "generate_answer_stream",
+    "ingest_document",
     "ingest_index_and_graph",
     "retrieve_and_verify",
-    "RetrievalOutcome",
-    "generate_answer_stream",
 ]
