@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app import cli
 from app.models import User
+from app.services.user_service import DEFAULT_LOCAL_USER_EMAIL
 
 
 def _patch_common(monkeypatch, db_session, fake_embedder, fake_vector_store, graph_path):
@@ -48,7 +49,7 @@ async def test_ingest_creates_default_local_user_on_first_use(
     out = capsys.readouterr().out
     assert "Ingested notes.md" in out
 
-    user = db_session.query(User).filter(User.email == cli._DEFAULT_LOCAL_USER_EMAIL).first()
+    user = db_session.query(User).filter(User.email == DEFAULT_LOCAL_USER_EMAIL).first()
     assert user is not None
 
 
