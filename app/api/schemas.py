@@ -69,7 +69,7 @@ class GroundingOut(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    status: str  # "grounded" | "refused" | "error"
+    status: str  # "grounded" | "conversation" | "refused" | "error"
     reason: str
     answer: str = ""
     citations: list[CitationOut] = []

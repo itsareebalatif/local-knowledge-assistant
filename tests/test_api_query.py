@@ -338,7 +338,7 @@ def test_query_stream_sends_a_conversation_id_event_first(
 
 class _OrderAwareLLM:
     """A stub whose Nth call returns a different canned response — lets a
-    test distinguish the query-rewrite call's output from the generation
+    test distinguish the query-router call's output from the generation
     call's output, which a single shared FakeLLM instance can't do since it
     returns the same `pieces` for every call regardless of order."""
 
@@ -369,8 +369,8 @@ def test_query_follow_up_is_rewritten_before_retrieval_runs(
     )
     llm = _OrderAwareLLM(
         responses=[
-            ["Hagrid ", "was ", "the ", "gamekeeper."],  # turn 1 generation (no history yet, no rewrite call)
-            ["What ", "are ", "Hagrid's ", "siblings?"],  # turn 2 rewrite call
+            ["Hagrid ", "was ", "the ", "gamekeeper."],  # turn 1 generation (no history yet, no router call)
+            ["ROUTE: hybrid\nQUERY: What are Hagrid's siblings?"],  # turn 2 router call
             ["Hagrid's ", "half-brother ", "is ", "Grawp."],  # turn 2 generation
         ]
     )
@@ -389,9 +389,9 @@ def test_query_follow_up_is_rewritten_before_retrieval_runs(
         body = second.json()
         assert body["status"] == "grounded"
         assert "Grawp" in body["answer"]
-        assert len(llm.calls) == 3  # turn 1 generation, turn 2 rewrite, turn 2 generation
-        rewrite_user_prompt = llm.calls[1][1]
-        assert "what about his siblings?" in rewrite_user_prompt
+        assert len(llm.calls) == 3  # turn 1 generation, turn 2 router, turn 2 generation
+        router_user_prompt = llm.calls[1][1]
+        assert "what about his siblings?" in router_user_prompt
     finally:
         app.dependency_overrides.clear()
 
@@ -416,5 +416,50 @@ def test_query_first_turn_never_calls_rewrite(
         )
         assert response.json()["status"] == "grounded"
         assert len(llm.calls) == 1  # generation only — no history yet, so no rewrite call
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_meta_question_about_the_conversation_never_touches_retrieval(
+    db_session, make_chunk, fake_embedder, fake_vector_store, registered_user, auth_headers
+):
+    # Nothing is indexed for this document on purpose — a meta question like
+    # "what did I ask earlier?" must never reach retrieve_and_verify at all,
+    # so it must never be refused for lacking a relevant chunk either.
+    make_chunk("Ollama runs language models locally on your own machine.", owner=registered_user.user)
+
+    llm = _OrderAwareLLM(
+        responses=[
+            ["Ollama ", "runs ", "locally."],  # turn 1 generation (no history yet, no router call)
+            ["ROUTE: meta\nQUERY: what did I ask earlier?"],  # turn 2 router call
+            ["You ", "asked ", "about ", "Ollama."],  # turn 2 transcript-answering call
+        ]
+    )
+
+    _override_all(db_session, fake_embedder, fake_vector_store, CooccurrenceGraphBuilder(), SpacyEntityExtractor(), llm)
+    try:
+        client = TestClient(app)
+        first = client.post("/api/query", json={"query": "What does Ollama run models on?"}, headers=auth_headers)
+        conversation_id = first.json()["conversation_id"]
+
+        second = client.post(
+            "/api/query",
+            json={"query": "what did I ask earlier?", "conversation_id": conversation_id},
+            headers=auth_headers,
+        )
+        body = second.json()
+        assert body["status"] == "conversation"
+        assert body["answer"] == "You asked about Ollama."
+        assert body["citations"] == []
+        assert body["grounding"] is None
+        assert len(llm.calls) == 3  # turn 1 generation, turn 2 router, turn 2 transcript answer — no retrieval call
+
+        # Regression for a real, confirmed-live bug: the current question had
+        # already been appended to the conversation before the transcript was
+        # read, so it showed up as the transcript's own last line — "what did
+        # I ask earlier?" would answer itself instead of the real prior turn.
+        transcript_prompt = llm.calls[2][1]
+        assert "What does Ollama run models on?" in transcript_prompt
+        assert transcript_prompt.count("what did I ask earlier?") == 1
     finally:
         app.dependency_overrides.clear()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from langfuse import propagate_attributes
@@ -19,20 +20,28 @@ from app.dependencies import (
     get_reranker,
     get_vector_store,
 )
-from app.llm.query_rewriter import rewrite_query
-from app.models import Conversation, User
+from app.llm.query_router import ROUTE_META, classify_and_rewrite
+from app.models import Conversation, Message, User
 from app.observability import observe, update
+from app.services.conversation_qa_service import _MAX_HISTORY_MESSAGES, answer_from_history_stream
 from app.services.conversation_service import append_message, create_conversation, get_conversation
 from app.services.generation_service import generate_answer_stream
 from app.services.retrieval_service import retrieve_and_verify
 
 router = APIRouter()
 
-_REWRITE_HISTORY_TURNS = 1  # the single most recent user+assistant pair
+_ROUTER_HISTORY_TURNS = 3  # enough for "what did I ask earlier" to reach back past the last reply
 
 
-def _recent_messages(conversation: Conversation) -> list:
-    return conversation.messages[-(_REWRITE_HISTORY_TURNS * 2) :]
+def _recent_messages(conversation: Conversation) -> list[Message]:
+    # Must be read before the current question is appended — see the
+    # module docstring note in conversation_qa_service on why a snapshot
+    # taken after that append put the current question into its own history.
+    return conversation.messages[-(_ROUTER_HISTORY_TURNS * 2) :]
+
+
+def _meta_history(conversation: Conversation) -> list[Message]:
+    return conversation.messages[-_MAX_HISTORY_MESSAGES:]
 
 
 def _sse_format(event: dict) -> str:
@@ -56,6 +65,39 @@ def _resolve_conversation(db: Session, user: User, conversation_id: int | None, 
     return conversation
 
 
+async def _event_source(
+    db: Session,
+    embedder,
+    vector_store,
+    graph_builder,
+    extractor,
+    llm,
+    reranker,
+    meta_history: list[Message],
+    user_id: int,
+    route: str,
+    search_query: str,
+    original_query: str,
+) -> AsyncIterator[dict]:
+    # Meta questions ("what did I ask earlier") are about this chat, not the
+    # documents — answered straight from the stored transcript, with no
+    # retrieval, no grounding gate, and no chance of a document-retrieval
+    # refusal on a question that was never about the documents to begin with.
+    # `meta_history` is a snapshot taken before the current question was
+    # appended to the conversation, so it never includes the current
+    # question as if it were a prior one.
+    if route == ROUTE_META:
+        async for event in answer_from_history_stream(llm, meta_history, original_query):
+            yield event
+        return
+
+    retrieval_outcome = await retrieve_and_verify(
+        db, embedder, vector_store, graph_builder, extractor, search_query, user_id, reranker
+    )
+    async for event in generate_answer_stream(db, llm, retrieval_outcome):
+        yield event
+
+
 @router.post("/query", response_model=QueryResponse, tags=["query"], summary="Ask a question, get one JSON response")
 async def query(
     payload: QueryRequest,
@@ -70,28 +112,33 @@ async def query(
 ) -> QueryResponse:
     conversation = _resolve_conversation(db, current_user, payload.conversation_id, payload.query)
     recent_messages = _recent_messages(conversation)
+    meta_history = _meta_history(conversation)
     append_message(db, conversation, "user", payload.query)
 
     with propagate_attributes(user_id=str(current_user.user_id), tags=["api-query"]):
+        route = "domain"
         search_query = payload.query
-        if get_settings().query_rewrite_enabled:
-            with observe("query-rewrite", input={"query": payload.query}) as rewrite_obs:
-                search_query = await rewrite_query(llm, payload.query, recent_messages)
-                update(rewrite_obs, output={"rewritten_query": search_query})
+        if get_settings().smart_routing_enabled:
+            with observe("query-router", input={"query": payload.query}) as router_obs:
+                decision = await classify_and_rewrite(llm, payload.query, recent_messages)
+                route, search_query = decision.route, decision.search_query
+                update(router_obs, output={"route": route, "search_query": search_query})
 
-        with observe("rag-query", input={"query": payload.query, "search_query": search_query}) as root:
-            retrieval_outcome = await retrieve_and_verify(
-                db, embedder, vector_store, graph_builder, extractor, search_query, current_user.user_id, reranker
-            )
-
-            status_ = retrieval_outcome.status
-            reason = retrieval_outcome.reason
+        with observe(
+            "rag-query", input={"query": payload.query, "search_query": search_query, "route": route}
+        ) as root:
+            status_ = "error"
+            reason = "no_response_generated"
             answer = ""
             citations: list[dict] = []
             grounding: dict | None = None
 
-            async for event in generate_answer_stream(db, llm, retrieval_outcome):
+            async for event in _event_source(
+                db, embedder, vector_store, graph_builder, extractor, llm, reranker,
+                meta_history, current_user.user_id, route, search_query, payload.query,
+            ):
                 if event["type"] == "done":
+                    status_ = "conversation" if route == ROUTE_META else "grounded"
                     answer = event["answer"]
                     citations = event["citations"]
                     grounding = event["grounding"]
@@ -104,7 +151,7 @@ async def query(
 
             update(root, output={"status": status_, "answer": answer})
 
-    if status_ == "grounded":
+    if status_ in ("grounded", "conversation"):
         assistant_text = answer
     elif status_ == "refused":
         assistant_text = _refusal_message(reason)
@@ -136,30 +183,36 @@ async def query_stream(
 ) -> StreamingResponse:
     conversation = _resolve_conversation(db, current_user, payload.conversation_id, payload.query)
     recent_messages = _recent_messages(conversation)
+    meta_history = _meta_history(conversation)
     append_message(db, conversation, "user", payload.query)
 
     async def event_stream():
         yield _sse_format({"type": "conversation", "conversation_id": conversation.conversation_id})
 
         with propagate_attributes(user_id=str(current_user.user_id), tags=["api-query-stream"]):
+            route = "domain"
             search_query = payload.query
-            if get_settings().query_rewrite_enabled:
-                with observe("query-rewrite", input={"query": payload.query}) as rewrite_obs:
-                    search_query = await rewrite_query(llm, payload.query, recent_messages)
-                    update(rewrite_obs, output={"rewritten_query": search_query})
+            if get_settings().smart_routing_enabled:
+                with observe("query-router", input={"query": payload.query}) as router_obs:
+                    decision = await classify_and_rewrite(llm, payload.query, recent_messages)
+                    route, search_query = decision.route, decision.search_query
+                    update(router_obs, output={"route": route, "search_query": search_query})
 
-            with observe("rag-query", input={"query": payload.query, "search_query": search_query}) as root:
-                retrieval_outcome = await retrieve_and_verify(
-                    db, embedder, vector_store, graph_builder, extractor, search_query, current_user.user_id, reranker
-                )
-                final_status = retrieval_outcome.status
-                final_reason = retrieval_outcome.reason
+            with observe(
+                "rag-query", input={"query": payload.query, "search_query": search_query, "route": route}
+            ) as root:
+                final_status = "error"
+                final_reason = "no_response_generated"
                 final_answer = ""
                 final_citations: list[dict] = []
                 final_grounding: dict | None = None
 
-                async for event in generate_answer_stream(db, llm, retrieval_outcome):
+                async for event in _event_source(
+                    db, embedder, vector_store, graph_builder, extractor, llm, reranker,
+                    meta_history, current_user.user_id, route, search_query, payload.query,
+                ):
                     if event["type"] == "done":
+                        final_status = "conversation" if route == ROUTE_META else "grounded"
                         final_answer = event["answer"]
                         final_citations = event["citations"]
                         final_grounding = event["grounding"]
@@ -172,7 +225,7 @@ async def query_stream(
                     yield _sse_format(event)
                 update(root, output={"status": final_status, "answer": final_answer})
 
-        if final_status == "grounded":
+        if final_status in ("grounded", "conversation"):
             assistant_text = final_answer
         elif final_status == "refused":
             assistant_text = _refusal_message(final_reason)

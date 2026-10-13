@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.llm.base import LLMBackend, LLMError
 from app.llm.citations import build_citations
 from app.llm.grounding_verifier import verify_grounding
-from app.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.llm.prompts import build_system_prompt, build_user_prompt
 from app.observability import observe, update
 from app.services.types import RetrievalOutcome
 
@@ -29,7 +29,7 @@ async def generate_answer_stream(
     answer_parts: list[str] = []
     with observe("llm-generate", as_type="generation", model=llm.model, input=user_prompt) as gen_obs:
         try:
-            async for piece in llm.generate_stream(SYSTEM_PROMPT, user_prompt):
+            async for piece in llm.generate_stream(build_system_prompt(), user_prompt):
                 answer_parts.append(piece)
                 yield {"type": "token", "text": piece}
         except LLMError as exc:

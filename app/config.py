@@ -48,17 +48,42 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_timeout_seconds: float = 60.0
 
+    # --- Optional cloud LLM: OpenAI ---
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_seconds: float = 60.0
+
     # --- Generation (Pipeline 2) ---
-    llm_backend: str = "local"  # "local" (Ollama) | "groq" | "gemini"
+    # To switch providers or models: change this value and the matching
+    # *_model setting above (e.g. GROQ_MODEL, OPENAI_MODEL) — never code.
+    # Every cloud provider here speaks the same OpenAI-compatible wire
+    # format and shares one implementation (app/llm/openai_compatible_backend.py);
+    # adding a new OpenAI-compatible provider is a new entry in the registry
+    # in app/llm/__init__.py, not a new backend class.
+    llm_backend: str = "local"  # "local" (Ollama) | "groq" | "gemini" | "openai"
     eval_llm_backend: str | None = None
     llm_temperature: float = 0.0
     llm_seed: int = 42
     min_sentence_grounding_coverage: float = 0.3
-    # Rewrites a conversational follow-up ("what about his siblings?") into a
-    # standalone query before retrieval, using the prior turn — skipped
-    # automatically on a conversation's first message (nothing to resolve
-    # against), so this only adds latency/cost on genuine follow-ups.
-    query_rewrite_enabled: bool = True
+    # Classifies each follow-up as "domain" (stands alone), "hybrid" (a
+    # document follow-up needing history to resolve pronouns), or "meta"
+    # (a question about the conversation itself, e.g. "what did I ask
+    # earlier") — and rewrites hybrid questions into standalone ones, all in
+    # one LLM call. Skipped automatically on a conversation's first message
+    # (nothing to classify against), so this only adds latency/cost on
+    # genuine follow-ups.
+    smart_routing_enabled: bool = True
+
+    # --- System prompt persona (threaded through every LLM-facing prompt) ---
+    # Pure wording — changing these doesn't touch retrieval, citation
+    # numbering, or anything the app parses back out of the model's answer
+    # (see app/llm/citations.py: citation markers are assigned by candidate
+    # position, not by parsing the model's text), so they're safe to
+    # override per-deployment without risking a different part of the
+    # pipeline breaking.
+    assistant_name: str = "a careful knowledge assistant"
+    citation_marker_style: str = "[{n}]"  # "{n}" is replaced with the passage number
 
     # --- Embeddings backend ---
     embedding_backend: str = "ollama"  # "ollama" (local) | "cohere"
