@@ -1,4 +1,3 @@
-#orchestrator of ingestion pipeline
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -28,10 +27,9 @@ async def ingest_index_and_graph(
 ) -> IngestOutcome:
     outcome = await ingest_document(db, user_id, file_bytes, filename, file_path=file_path)
     if outcome.status != "ingested":
-        return outcome 
-        
-    await embed_pending_chunks(db, embedder, vector_store, outcome.pending_embedding_chunk_ids)
+        return outcome
 
+    await embed_pending_chunks(db, embedder, vector_store, outcome.pending_embedding_chunk_ids)
 
     chunks = db.execute(select(Chunk).where(Chunk.doc_id == outcome.document_id)).scalars().all()
     for chunk in chunks:

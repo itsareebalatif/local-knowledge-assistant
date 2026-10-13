@@ -39,8 +39,6 @@ END;
 
 
 def create_fts_index(engine: Engine) -> None:
-    """Create the chunks_fts virtual table and its sync triggers if they
-    don't already exist. Safe to call every startup (init_db.py does)."""
     with engine.begin() as conn:
         conn.execute(text(_CREATE_FTS_TABLE))
         conn.execute(text(_CREATE_INSERT_TRIGGER))

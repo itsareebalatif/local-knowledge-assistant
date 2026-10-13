@@ -1,19 +1,3 @@
-"""Retrieval evaluation harness.
-
-Runs a labeled set of (query, relevant_chunk_ids) cases through the real
-retrieval pipeline — BM25 + vector + graph expansion, fused by RRF, same as
-app.services.retrieval_service — and reports Recall@k, Precision@k and MRR
-against the known-correct chunk_ids, plus whether the grounding gate would
-have accepted or refused each case.
-
-This needs ground truth: a small set of questions about your own ingested
-documents where you already know which chunk_id(s) answer them. There's no
-way around hand-labeling that — these metrics measure retrieval quality
-against a known answer, they don't invent one. Load cases from a JSON file
-of the shape: [{"query": "...", "relevant_chunk_ids": [12, 47]}, ...] via
-load_eval_cases().
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -74,9 +58,6 @@ class EvaluationReport:
 
     @property
     def gate_refusal_rate(self) -> float:
-        """Fraction of cases the grounding gate would refuse — high alongside
-        low recall is the signature of "retrieval can't find the answer, and
-        at least the gate is catching that" rather than silent hallucination."""
         return _mean(0.0 if r.gate_sufficient else 1.0 for r in self.results)
 
 
@@ -117,6 +98,7 @@ async def evaluate_retrieval(
             candidate_embeddings = await embedder.embed([c.content for c in fused], input_type="search_document")
             fused = mmr_select(fused, candidate_embeddings, k=settings.mmr_top_k, lambda_param=settings.mmr_lambda)
         retrieved_ids = [c.chunk_id for c in fused]
+
         verdict = evaluate_context_sufficiency(case.query, fused)
 
         results.append(

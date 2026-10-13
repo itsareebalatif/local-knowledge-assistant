@@ -9,17 +9,10 @@ from app.config import get_settings
 
 
 class EmbeddingError(Exception):
-    """Raised when an embedding backend can't be reached or returns
-    something unusable — e.g. Ollama's model hasn't been pulled yet, or a
-    cloud backend's API key is missing."""
+    pass
 
 
 class EmbedderBackend(Protocol):
-    """Shared interface both OllamaEmbedder and CohereEmbedder satisfy —
-    every caller (embedding_service.py, vector_search.py, cli.py, ...)
-    type-hints against this, never a specific provider, the same pattern
-    app.llm.base.LLMBackend already uses on the generation side."""
-
     async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]: ...
 
 
@@ -38,10 +31,7 @@ class OllamaEmbedder:
         self._transport = transport  # test hook; None uses a real network transport
 
     async def embed(self, texts: list[str], input_type: str = "search_document") -> list[list[float]]:
-        # input_type is part of the shared embedder interface (Cohere's API
-        # needs it — see cohere_embedder.py) but Ollama/nomic-embed-text has
-        # no such concept, so it's accepted here purely for call-site
-        # symmetry and otherwise ignored.
+        # input_type accepted for interface symmetry with CohereEmbedder; unused by Ollama.
         if not texts:
             return []
         try:

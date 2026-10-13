@@ -29,10 +29,19 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
 class QueryRequest(BaseModel):
-    # No user_id here on purpose: the user is the one get_current_user
-    # resolves from the Authorization header, never one the client names.
+    # No user_id: the caller is resolved from the auth header, not client input.
     query: str
+    conversation_id: int | None = None
 
 
 class IngestResponse(BaseModel):
@@ -55,16 +64,17 @@ class CitationOut(BaseModel):
 
 
 class GroundingOut(BaseModel):
-    overall_coverage: float
+    overall_coverage: float | None
     unsupported_sentences: list[str]
 
 
 class QueryResponse(BaseModel):
-    status: str  # "grounded" | "refused" | "error"
+    status: str  # "grounded" | "conversation" | "refused" | "error"
     reason: str
     answer: str = ""
     citations: list[CitationOut] = []
     grounding: GroundingOut | None = None
+    conversation_id: int | None = None
 
 
 class GraphNeighbor(BaseModel):
@@ -97,3 +107,29 @@ class DocumentListResponse(BaseModel):
     documents: list[DocumentOut]
     total_documents: int
     total_chunks: int
+
+
+class ConversationOut(BaseModel):
+    conversation_id: int
+    title: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationOut]
+
+
+class MessageOut(BaseModel):
+    message_id: int
+    role: str
+    content: str
+    citations: list[dict] | None = None
+    grounding: dict | None = None
+    created_at: datetime.datetime
+
+
+class ConversationDetailResponse(BaseModel):
+    conversation_id: int
+    title: str
+    messages: list[MessageOut]

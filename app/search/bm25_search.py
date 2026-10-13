@@ -1,14 +1,3 @@
-"""BM25 keyword search over chunks_fts (FR-3.3).
-
-Only responsible for returning a correctly ranked list — the raw bm25()
-score is kept on CandidateChunk.score purely for logging, since RRF fusion
-(see rrf_fusion.py) only needs this list's rank order, not the score itself.
-
-`user_id` is required and filtered in SQL (joined through documents), not
-applied afterward — the same per-user isolation principle as
-vector_search.py's Chroma `where` filter.
-"""
-
 from __future__ import annotations
 
 import re
@@ -18,15 +7,17 @@ from sqlalchemy.orm import Session
 
 from app.search.types import CandidateChunk
 
-# Word tokens only: FTS5 MATCH syntax treats quotes, colons, hyphens, and
-# keywords like AND/OR/NOT specially. Quoting each token individually and
-# joining with OR sidesteps all of that — every token is searched as a
-# literal phrase, and a raw query like `qwen2.5:3b OR "hack"` can't be
-# misread as FTS5 query syntax.
-_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+# Quoting each token individually as a literal avoids FTS5 MATCH syntax
+# misreading raw query text (e.g. colons, AND/OR/NOT).
+_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+
+_CAMEL_BOUNDARY_SIMPLE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_CAMEL_BOUNDARY_ACRONYM = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _build_match_query(query: str) -> str | None:
+    query = _CAMEL_BOUNDARY_SIMPLE.sub(" ", query)
+    query = _CAMEL_BOUNDARY_ACRONYM.sub(" ", query)
     tokens = _TOKEN_PATTERN.findall(query)
     if not tokens:
         return None

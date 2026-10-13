@@ -1,4 +1,3 @@
-###
 from __future__ import annotations
 
 import math
@@ -13,15 +12,7 @@ from app.embeddings.vector_store import ChromaVectorStore
 EMBEDDING_DIM = 768  
 
 def _percentile(sorted_values: list[float], pct: float) -> float:
-    """Nearest-rank percentile: always returns an actual observed value, so
-    p50 <= p95 <= p99 <= max always holds regardless of sample size.
-
-    statistics.quantiles() was tried first and rejected: its default
-    interpolation method can extrapolate ABOVE the observed max when the
-    requested quantile count (e.g. n=100 for p99) is large relative to the
-    number of samples — exactly the case here with n_queries typically in
-    the tens, not thousands.
-    """
+    # Nearest-rank percentile, not statistics.quantiles(), to avoid extrapolating above the observed max
     if not sorted_values:
         return 0.0
     rank = max(0, min(len(sorted_values) - 1, math.ceil(pct / 100 * len(sorted_values)) - 1))

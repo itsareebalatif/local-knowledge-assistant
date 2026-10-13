@@ -1,11 +1,5 @@
 "use strict";
 
-/* Personal Knowledge Engine — dashboard frontend.
- * Vanilla JS, no build step, no framework — one file, matches the rest of
- * this project's "keep it simple" approach. D3 (loaded via CDN in
- * index.html) is the one external dependency, used only for the graph.
- */
-
 let TOKEN = null;
 let REFRESH_TOKEN = null;
 let ACCOUNT_EMAIL = null;
@@ -17,10 +11,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ---------------------------------------------------------------------
-// Auth: register/login/logout, tokens kept in localStorage (per-browser,
-// never sent anywhere but this app's own API).
-// ---------------------------------------------------------------------
 function authHeaders() {
   return { Authorization: `Bearer ${TOKEN}` };
 }
@@ -61,10 +51,7 @@ async function authFetch(url, options = {}, _alreadyRetried = false) {
   const response = await fetch(url, { ...options, headers });
   if (response.status !== 401) return response;
 
-  // The access token expired — try the refresh token once before giving
-  // up. Only one retry: if the retried request is also a 401 (or the
-  // refresh call itself fails), the refresh token is gone too and this is
-  // a real "log in again," not a transient blip.
+  // Only one retry: if that also fails, the refresh token is gone too.
   if (!_alreadyRetried && (await tryRefreshToken())) {
     return authFetch(url, options, true);
   }
@@ -108,11 +95,6 @@ async function initAuth() {
   const storedEmail = localStorage.getItem("pke_email");
 
   if (TOKEN) {
-    // Confirm the stored token still works (it may have been invalidated by
-    // a login elsewhere, or logout) rather than trusting localStorage blindly.
-    // authFetch itself will transparently refresh if the access token has
-    // simply expired, so this check only truly fails when the refresh
-    // token is also gone (logout, or a refresh token that's expired too).
     const check = await authFetch("/api/graph");
     if (check.ok) {
       showApp(storedEmail || "");
@@ -163,8 +145,7 @@ async function onLogout() {
   try {
     await authFetch("/api/auth/logout", { method: "POST" });
   } catch {
-    // Logging out locally still happens even if the request fails (e.g. the
-    // token was already invalid) — there's nothing useful to retry here.
+    // Local logout still proceeds even if this request fails.
   }
   clearTokens();
   showAuthPanel();
@@ -180,9 +161,6 @@ function initAuthForm() {
   document.getElementById("logout-btn").addEventListener("click", onLogout);
 }
 
-// ---------------------------------------------------------------------
-// Drag-and-drop file upload
-// ---------------------------------------------------------------------
 function initUpload() {
   const dropzone = document.getElementById("dropzone");
   const fileInput = document.getElementById("file-input");
@@ -205,9 +183,7 @@ function initUpload() {
 }
 
 async function handleFiles(fileList) {
-  // Sequential, not Promise.all: each ingest already does real CPU work
-  // (parsing, embedding, graph building) — firing them all at once would
-  // just queue behind the same DB/Ollama/Chroma connections anyway.
+  // Sequential, not Promise.all: ingests queue behind the same backend anyway.
   for (const file of fileList) {
     await uploadFile(file);
   }
@@ -229,7 +205,7 @@ async function uploadFile(file) {
     statusEl.textContent = summarizeIngest(data);
     statusEl.className = `status status-${data.status}`;
     if (data.status === "ingested") {
-      loadGraph(); // new entities may have just been added
+      loadGraph();
       loadDocuments();
     }
   } catch (err) {
@@ -238,9 +214,6 @@ async function uploadFile(file) {
   }
 }
 
-// ---------------------------------------------------------------------
-// Document list — "what have I actually uploaded, and how much of it."
-// ---------------------------------------------------------------------
 async function loadDocuments() {
   const summaryEl = document.getElementById("documents-summary");
   const listEl = document.getElementById("documents-list");
@@ -255,6 +228,11 @@ async function loadDocuments() {
       const row = document.createElement("li");
       const uploaded = new Date(doc.created_at).toLocaleString();
       row.innerHTML = `<span>${escapeHtml(doc.file_name)}</span><span class="status">${doc.chunk_count} chunks · ${uploaded}</span>`;
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "Delete";
+      deleteBtn.className = "secondary delete-doc-btn";
+      deleteBtn.addEventListener("click", () => onDeleteDocument(doc.doc_id, doc.file_name));
+      row.appendChild(deleteBtn);
       listEl.appendChild(row);
     }
     if (data.documents.length === 0) {
@@ -262,6 +240,21 @@ async function loadDocuments() {
     }
   } catch {
     summaryEl.textContent = "Could not load documents.";
+  }
+}
+
+async function onDeleteDocument(docId, fileName) {
+  if (!confirm(`Delete "${fileName}" and all its chunks/embeddings? This can't be undone.`)) return;
+  try {
+    const res = await authFetch(`/api/documents/${docId}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body.detail || `Delete failed (${res.status}).`);
+      return;
+    }
+    await loadDocuments();
+  } catch (err) {
+    alert(`Could not reach the API: ${err}`);
   }
 }
 
@@ -278,9 +271,20 @@ function summarizeIngest(data) {
   }
 }
 
-// ---------------------------------------------------------------------
-// Query + streaming answer
-// ---------------------------------------------------------------------
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function refusalMessage(reason) {
+  if (reason === "no_candidates") {
+    return "I couldn't find anything in your documents related to that. Try rephrasing, or upload a document that covers this topic.";
+  }
+  if (reason === "low_keyword_coverage") {
+    return "I don't have enough information in your documents to answer that confidently. Try rephrasing using wording closer to what's actually in the document, or ask about something more specific.";
+  }
+  return "I don't have enough grounded information in your documents to answer that.";
+}
+
 async function streamQuery(question, handlers) {
   const res = await authFetch("/api/query/stream", {
     method: "POST",
@@ -291,8 +295,7 @@ async function streamQuery(question, handlers) {
     throw new Error(`request failed: ${res.status}`);
   }
 
-  // EventSource can't send a POST body, so SSE frames are parsed by hand
-  // off the fetch Response's streaming body instead.
+  // EventSource can't send a POST body, so SSE frames are parsed by hand here.
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -303,20 +306,26 @@ async function streamQuery(question, handlers) {
     buffer += decoder.decode(value, { stream: true });
 
     const frames = buffer.split("\n\n");
-    buffer = frames.pop(); // last element may be an incomplete frame — keep it for next read
+    buffer = frames.pop(); // may be an incomplete frame
 
     for (const frame of frames) {
       const line = frame.trim();
       if (!line.startsWith("data:")) continue;
       const event = JSON.parse(line.slice(5).trim());
       const handler = handlers[event.type];
-      if (handler) handler(event);
+      if (!handler) continue;
+      if (event.type === "token") {
+        // Purely cosmetic pacing; tokens actually arrive much faster.
+        await sleep(18);
+      }
+      handler(event);
     }
   }
 }
 
 function groundingSummary(grounding) {
   if (!grounding) return "";
+  if (grounding.overall_coverage === null) return "No factual claims to verify.";
   const pct = Math.round(grounding.overall_coverage * 100);
   const warn = grounding.unsupported_sentences.length
     ? ` — ⚠ ${grounding.unsupported_sentences.length} sentence(s) not clearly grounded in sources`
@@ -377,7 +386,8 @@ async function onAsk() {
         statusBox.textContent = groundingSummary(event.grounding);
       },
       refused: (event) => {
-        statusBox.textContent = `No grounded answer available (reason: ${event.reason}).`;
+        answerBox.textContent = refusalMessage(event.reason);
+        statusBox.textContent = "";
       },
       error: (event) => {
         statusBox.textContent = `Error: ${event.message}`;
@@ -395,9 +405,6 @@ function initQuery() {
   });
 }
 
-// ---------------------------------------------------------------------
-// Graph visualization (D3 force layout over GET /api/graph)
-// ---------------------------------------------------------------------
 const TYPE_COLOR = {
   Person: "#e07a5f",
   Organization: "#3d5a80",
@@ -406,9 +413,7 @@ const TYPE_COLOR = {
 };
 
 function adjacencyDataToGraph(data) {
-  // nx.adjacency_data() shape: {nodes: [{id, name, type, ...}], adjacency: [[{id, weight}, ...], ...]}
-  // indexed in parallel with `nodes`. Undirected edges appear twice (once
-  // from each endpoint's adjacency list) — deduped below by node-index pair.
+  // Undirected edges appear twice in adjacency; deduped below by node-index pair.
   const nodes = data.nodes.map((n) => ({ id: n.id, name: n.name, type: n.type }));
   const indexById = new Map(nodes.map((n, i) => [n.id, i]));
   const links = [];
@@ -535,7 +540,6 @@ function initGraph() {
   loadGraph();
 }
 
-// ---------------------------------------------------------------------
 window.addEventListener("DOMContentLoaded", async () => {
   initAuthForm();
   await initAuth();

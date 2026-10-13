@@ -14,8 +14,7 @@ def test_entity_extractor_maps_labels_to_erd_types():
     extractor = SpacyEntityExtractor()
     entities = extractor.extract("Ollama was built to run models like qwen locally in Karachi.")
     types_found = {t for _, t in entities}
-    # Exact NER output can vary a bit by spaCy version; what matters is the
-    # label mapping and noise filtering, not this model's exact guesses.
+    # NER output varies by spaCy version; what matters is label mapping, not exact guesses.
     assert types_found <= {"Person", "Organization", "Location", "Concept"}
     assert any(name == "Karachi" for name, _ in entities)
 
@@ -41,7 +40,7 @@ def test_graph_builder_adds_nodes_and_weighted_edges():
     neighbors = builder.neighbors("Ollama", "Organization")
     assert neighbors == ["Location:karachi"]
     edge_weight = builder.graph["Organization:ollama"]["Location:karachi"]["weight"]
-    assert edge_weight == 2  # co-occurred in two different chunks
+    assert edge_weight == 2
 
 
 def test_graph_builder_save_and_load_round_trip(tmp_path):
@@ -122,7 +121,7 @@ def test_build_graph_for_chunk_increments_weight_on_repeat_cooccurrence(db_sessi
 
     if len(entities_b) >= 2:
         edges = db_session.execute(select(RelationEdge)).scalars().all()
-        assert len(edges) == 1  # same pair, not a duplicate edge
+        assert len(edges) == 1
         assert edges[0].weight == 2.0
 
 

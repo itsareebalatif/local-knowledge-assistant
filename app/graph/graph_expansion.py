@@ -1,19 +1,3 @@
-"""1-hop NetworkX graph expansion for retrieval (FR-4.2).
-
-Extracts entities from the query itself, finds each one's 1-hop neighbors in
-the co-occurrence graph, and pulls the chunks linked to those *neighbors* —
-surfacing chunks that are conceptually related to the query even when they
-share no vocabulary with it and aren't embedding-similar either (e.g. a
-query about "Ollama" pulling in a chunk that only mentions "qwen2.5:3b",
-because the graph has learned the two co-occur often).
-
-The co-occurrence graph itself is shared/global across users (it's entity
-structure, not document content), so the chunk_ids it names must be filtered
-down to ones the requesting user actually owns — and that filter has to run
-BEFORE the top_k cut, not after: truncating first could crowd out a user's
-own results with higher-weight chunks that happen to belong to someone else.
-"""
-
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -38,7 +22,6 @@ def expand_via_graph(
         return []
 
     graph = graph_builder.graph
-    # chunk_id -> strongest co-occurrence weight linking it to any query entity.
     chunk_weight: dict[int, float] = {}
 
     for name, entity_type in query_entities:
@@ -53,6 +36,8 @@ def expand_via_graph(
     if not chunk_weight:
         return []
 
+    # Filter to the requesting user's chunks before the top_k cut, since the graph is shared
+    # across users and truncating first could crowd out their own results.
     rows = db.execute(
         select(Chunk)
         .join(Document, Chunk.doc_id == Document.doc_id)

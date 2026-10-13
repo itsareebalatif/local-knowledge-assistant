@@ -121,6 +121,17 @@ main {
 .status-duplicate_file { color: #c98a1d; }
 .status-error, .status-unsupported, .status-parse_failed { color: #c0392b; }
 
+.delete-doc-btn {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  margin-left: 0.75rem;
+}
+.delete-doc-btn:hover {
+  background: #c0392b;
+  color: white;
+  border-color: #c0392b;
+}
+
 .query-row { display: flex; gap: 0.5rem; }
 
 .query-row input {

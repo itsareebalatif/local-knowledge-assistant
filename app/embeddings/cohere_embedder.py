@@ -1,19 +1,3 @@
-"""Cloud embedding backend via Cohere's Embed v2 API — the non-local
-alternative to app.embeddings.embedder.OllamaEmbedder.
-
-Picked over the LLM's own cloud fallback (Groq) specifically because Groq
-doesn't offer an embeddings endpoint at all; Cohere does. Choosing this one
-means chunk text leaves the machine at embed time, same privacy trade-off
-already made for the Groq LLM backend — opt-in via EMBEDDING_BACKEND=cohere
-in .env, never the default.
-
-input_type is required by Cohere's API and actually matters for quality:
-"search_document" at index time, "search_query" at query time, on the same
-embedding space. The shared embedder interface threads this through from
-both call sites (embedding_service.py for indexing, vector_search.py for
-querying) rather than hardcoding one.
-"""
-
 from __future__ import annotations
 
 import httpx
@@ -56,9 +40,7 @@ class CohereEmbedder:
         except httpx.HTTPStatusError as exc:
             raise EmbeddingError(f"Cohere returned {exc.response.status_code}: {exc.response.text}") from exc
 
-        # v2 nests float vectors under embeddings.float (see module docstring
-        # — other formats like int8/binary are opt-in via embedding_types,
-        # not requested here).
+        # v2 nests float vectors under embeddings.float; other formats need embedding_types.
         embeddings = (data.get("embeddings") or {}).get("float")
         if not embeddings or len(embeddings) != len(texts):
             raise EmbeddingError(f"Unexpected response from Cohere embed endpoint: {data!r}")

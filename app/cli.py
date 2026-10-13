@@ -1,20 +1,10 @@
-"""kengine — command-line interface (SRS 5.1).
-
-    kengine ingest <path> [--user-id N]
-    kengine query "<question>"
-    kengine evaluate <cases.json> [--k N]
-    kengine evaluate-context-precision <golden.json> [--k N]
-
-Builds real singletons per invocation (Ollama embedder/LLM, Chroma, spaCy,
-the on-disk graph) and talks to the same service layer the FastAPI app
-uses — no HTTP round trip, same code path either way.
-"""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
+
+from langfuse import propagate_attributes
 
 from app.config import get_settings
 from app.db.base import SessionLocal
@@ -26,6 +16,7 @@ from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.ingestion.loader import load_local_file
 from app.llm import get_llm_backend
+from app.observability import get_langfuse, observe, update
 from app.search.reranker import CrossEncoderReranker
 from app.services.generation_service import generate_answer_stream
 from app.services.pipeline_service import ingest_index_and_graph
@@ -76,27 +67,39 @@ async def _cmd_query(args: argparse.Namespace) -> None:
         llm = get_llm_backend()
         reranker = CrossEncoderReranker() if settings.rerank_enabled else None
 
-        retrieval_outcome = await retrieve_and_verify(
-            db, embedder, vector_store, graph_builder, extractor, args.question, user_id, reranker
-        )
+        with propagate_attributes(user_id=str(user_id), tags=["cli-query"]), observe(
+            "rag-query", input={"query": args.question}
+        ) as root:
+            retrieval_outcome = await retrieve_and_verify(
+                db, embedder, vector_store, graph_builder, extractor, args.question, user_id, reranker
+            )
 
-        if retrieval_outcome.status != "grounded":
-            print(f"I don't have enough grounded information to answer that (reason: {retrieval_outcome.reason}).")
-            return
+            if retrieval_outcome.status != "grounded":
+                print(f"I don't have enough grounded information to answer that (reason: {retrieval_outcome.reason}).")
+                update(root, output={"status": retrieval_outcome.status})
+                return
 
-        async for event in generate_answer_stream(db, llm, retrieval_outcome):
-            if event["type"] == "token":
-                print(event["text"], end="", flush=True)  # real-time stdout token printing (SRS 5.1)
-            elif event["type"] == "error":
-                print(f"\n[error] {event['message']}", file=sys.stderr)
-            elif event["type"] == "done":
-                print()
-                if event["citations"]:
-                    print("\nSources:")
-                    for c in event["citations"]:
-                        print(f"  [{c['marker']}] {c['file_name']} — {c['snippet']}")
+            full_answer_parts: list[str] = []
+            async for event in generate_answer_stream(db, llm, retrieval_outcome):
+                if event["type"] == "token":
+                    print(event["text"], end="", flush=True)
+                    full_answer_parts.append(event["text"])
+                elif event["type"] == "error":
+                    print(f"\n[error] {event['message']}", file=sys.stderr)
+                elif event["type"] == "done":
+                    print()
+                    if event["citations"]:
+                        print("\nSources:")
+                        for c in event["citations"]:
+                            print(f"  [{c['marker']}] {c['file_name']} — {c['snippet']}")
+
+            update(root, output={"status": retrieval_outcome.status, "answer": "".join(full_answer_parts)})
     finally:
         db.close()
+        # explicit flush: short-lived process may exit before the SDK's background thread sends traces
+        langfuse = get_langfuse()
+        if langfuse is not None:
+            langfuse.flush()
 
 
 async def _cmd_evaluate(args: argparse.Namespace) -> None:
@@ -140,9 +143,7 @@ async def _cmd_evaluate_context_precision(args: argparse.Namespace) -> None:
         vector_store = ChromaVectorStore()
         graph_builder = CooccurrenceGraphBuilder.load(settings.graph_store_path)
         extractor = SpacyEntityExtractor()
-        # Judging can run on a different backend than live generation does —
-        # EVAL_LLM_BACKEND overrides LLM_BACKEND for this call only, and
-        # defaults to it (unchanged behavior) when left unset in .env.
+        # EVAL_LLM_BACKEND overrides LLM_BACKEND for judging only, falling back to it if unset
         llm = get_llm_backend(settings.eval_llm_backend or settings.llm_backend)
         reranker = CrossEncoderReranker() if settings.rerank_enabled else None
 

@@ -27,8 +27,9 @@ async def test_retrieve_and_verify_returns_grounded_when_bm25_and_vector_agree(
     assert chunk.chunk_id in {c.chunk_id for c in outcome.candidates}
     # Two embed calls, not one: the first is vector_search's query embedding
     # (proves the vector path actually ran); the second is MMR re-embedding
-    # the fused candidates' own text to measure diversity between them —
-    # a different question from "how similar is this to the query."
+    # the fused candidates' own text to measure diversity between them. The
+    # grounding gate no longer embeds anything — it only checks whether any
+    # candidates exist at all; see app/search/grounding_gate.py.
     assert len(fake_embedder.calls) == 2
     assert fake_embedder.calls[0] == ["What does Ollama run models on?"]
     assert fake_embedder.calls[1] == [chunk.content]

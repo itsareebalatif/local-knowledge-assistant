@@ -1,12 +1,3 @@
-"""Default local user — this is a personal, single-user-by-default tool.
-
-Both the CLI and the dashboard need a user_id to attach ingested documents
-to. Rather than making every caller invent one that means nothing yet, this
-creates (or finds) one local user on first use. Multi-user support would
-replace this with real auth later; nothing above the DB layer assumes it
-can't be.
-"""
-
 from __future__ import annotations
 
 from sqlalchemy import select

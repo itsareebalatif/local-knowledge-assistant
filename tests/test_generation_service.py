@@ -42,6 +42,8 @@ async def test_grounded_outcome_streams_tokens_then_final_event(db_session, make
 
 async def test_llm_error_yields_error_event_not_exception(db_session, make_chunk):
     class FailingLLM:
+        model = "fake-failing-llm"
+
         async def generate_stream(self, system_prompt, user_prompt):
             if True:
                 raise LLMError("boom")

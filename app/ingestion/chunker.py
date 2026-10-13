@@ -43,22 +43,12 @@ class HeaderAwareChunker:
 
         for block in blocks:
             if block.type == "heading":
-                # A new heading always starts a fresh chunk: mixing two
-                # sections into one chunk would blur retrieval relevance.
                 flush()
                 while heading_stack and heading_stack[-1][0] >= block.level:
                     heading_stack.pop()
                 heading_stack.append((block.level, block.text))
 
-                # Seed the new section with its own heading text. Without
-                # this, a heading followed by no paragraph/table/code block
-                # (an outline or agenda made entirely of headings — "Day 1",
-                # "Day 2", ...) never reaches flush() with anything in the
-                # buffer, so the whole section silently vanishes: zero
-                # chunks, zero warnings, looks like a successful ingest of
-                # nothing. Bonus effect: every chunk now starts with its own
-                # section heading, which helps BM25/keyword matching on
-                # queries that name the section directly.
+                # Seed with heading text so a heading-only section (no body) still produces a chunk
                 heading_text = block.text.strip()
                 if heading_text:
                     buffer_parts.append(heading_text)

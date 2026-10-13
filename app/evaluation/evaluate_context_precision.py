@@ -26,9 +26,7 @@ from app.search.vector_search import vector_search
 
 logger = logging.getLogger(__name__)
 
-# Source documents extracted from PDFs often carry citation-marker
-# artifacts like "[cite: 10]" or "[cite: 11, 12]" — noise for a judge
-# model trying to read the actual answer text, not part of its meaning.
+# Strips PDF citation-marker artifacts like "[cite: 10]" before judging
 _CITATION_MARKER = re.compile(r"\[cite:[^\]]*\]", re.IGNORECASE)
 
 

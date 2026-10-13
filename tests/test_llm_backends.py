@@ -27,6 +27,23 @@ async def test_ollama_streams_pieces_in_order():
     assert pieces == ["Hello ", "world."]
 
 
+async def test_ollama_sends_temperature_and_seed_under_options(monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_temperature", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "llm_seed", 42, raising=False)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return _ollama_ndjson_handler(request)
+
+    transport = httpx.MockTransport(handler)
+    llm = OllamaLLM(base_url="http://fake-ollama", transport=transport)
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert captured["payload"]["options"] == {"temperature": 0.0, "seed": 42}
+
+
 async def test_ollama_raises_clear_error_when_unreachable():
     # No mock transport, nothing listening on this port: a real connection
     # failure, proving the error path works without needing a live Ollama.
@@ -89,6 +106,27 @@ async def test_openai_compatible_streams_pieces_in_order():
     assert pieces == ["Hi ", "there."]
 
 
+def _sse_handler_with_usage(request: httpx.Request) -> httpx.Response:
+    # Confirmed against a real Groq response: the final chunk (empty delta,
+    # finish_reason "stop") carries a top-level "usage" object even without
+    # requesting stream_options.include_usage.
+    body = (
+        'data: {"choices":[{"delta":{"content":"Hi."}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+        '"usage":{"prompt_tokens":78,"completion_tokens":208,"total_tokens":286}}\n\n'
+        "data: [DONE]\n\n"
+    )
+    return httpx.Response(200, text=body)
+
+
+async def test_openai_compatible_captures_token_usage_from_the_final_chunk():
+    transport = httpx.MockTransport(_sse_handler_with_usage)
+    llm = _make_llm(transport=transport)
+    assert llm.last_usage is None  # nothing parsed yet, before the stream has run
+    [_ async for _ in llm.generate_stream("sys", "user")]
+    assert llm.last_usage == {"input": 78, "output": 208}
+
+
 async def test_openai_compatible_without_api_key_raises_immediately_naming_its_env_var():
     llm = _make_llm(api_key=None, api_key_env_var="SOME_PROVIDER_API_KEY")
     with pytest.raises(LLMError, match="SOME_PROVIDER_API_KEY"):
@@ -136,7 +174,7 @@ async def test_openai_compatible_sends_temperature_and_seed_when_enabled(monkeyp
     assert captured["payload"]["seed"] == 42
 
 
-async def test_openai_compatible_omits_seed_when_disabled():
+async def test_openai_compatible_omits_seed_when_disabled(monkeypatch):
     # Gemini's OpenAI-compatible endpoint rejects "seed" outright
     # (confirmed live: 400, 'Unknown name "seed": Cannot find field').
     captured = {}

@@ -32,7 +32,6 @@ class SpacyEntityExtractor:
         self._nlp = _load_pipeline()
 
     def extract(self, text: str) -> list[tuple[str, str]]:
-        
         if not text or not text.strip():
             return []
         doc = self._nlp(text)

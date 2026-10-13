@@ -13,8 +13,11 @@ from app.ingestion.exceptions import ParsingError
 from app.ingestion.parsers.base import BaseParser
 from app.ingestion.types import Block, ParsedDocument
 
-_LINE_Y_TOLERANCE = 2.0  
-_PARAGRAPH_GAP_FACTOR = 1.6  
+_LINE_Y_TOLERANCE = 2.0
+_PARAGRAPH_GAP_FACTOR = 1.6
+_HEADER_BAND_HEIGHT_RATIO = 0.08
+_HEADER_BAND_TOLERANCE = 3.0
+_HEADER_MIN_PAGE_RATIO = 0.3
 
 
 @dataclass
@@ -47,6 +50,7 @@ class PdfParser(BaseParser):
     def _parse_with_pdfplumber(self, file_bytes: bytes) -> ParsedDocument:
         warnings: list[str] = []
         page_lines: list[list[_Line]] = []
+        page_heights: list[float] = []
         page_tables: list[list[list[str]]] = []
 
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
@@ -54,11 +58,14 @@ class PdfParser(BaseParser):
                 raise ParsingError("PDF has no pages")
             for page in pdf.pages:
                 page_lines.append(self._extract_lines(page))
+                page_heights.append(page.height)
                 try:
                     page_tables.append(page.extract_tables())
                 except Exception:  # noqa: BLE001 - deliberate: a broken table extractor shouldn't sink the whole page
                     page_tables.append([])
                     warnings.append(f"Table extraction failed on page {page.page_number}")
+
+        page_lines = self._strip_positional_running_headers(page_lines, page_heights)
 
         all_lines = [line for lines in page_lines for line in lines]
         if not all_lines:
@@ -67,9 +74,6 @@ class PdfParser(BaseParser):
 
         body_size = self._dominant_size(all_lines)
 
-        # Strip repeated running headers/footers page-by-page (join each
-        # page's lines into "text" so the existing pages-based dedup util
-        # can be reused), then re-derive which per-line texts survived.
         raw_page_texts = ["\n".join(line.text for line in lines) for lines in page_lines]
         cleaned_page_texts = strip_repeated_page_furniture(raw_page_texts)
         kept_lines_per_page = [
@@ -78,7 +82,16 @@ class PdfParser(BaseParser):
 
         blocks: list[Block] = []
         for lines, kept, tables in zip(page_lines, kept_lines_per_page, page_tables):
-            blocks.extend(self._lines_to_blocks([ln for ln in lines if ln.text.strip() in kept], body_size))
+            # `kept` went through normalize_text() inside strip_repeated_page_furniture
+            # (NFKC — e.g. expands "…" into multiple characters), so a raw
+            # ln.text never matches it exactly. Confirmed live: this silently
+            # dropped any line containing such a character from the whole
+            # document. Normalize this side the same way before comparing.
+            blocks.extend(
+                self._lines_to_blocks(
+                    [ln for ln in lines if normalize_text(ln.text.strip()) in kept], body_size
+                )
+            )
             for table in tables:
                 text = self._table_to_text(table)
                 if text:
@@ -89,6 +102,36 @@ class PdfParser(BaseParser):
             meta={"source_format": "pdf", "page_count": str(len(page_lines))},
             warnings=warnings,
         )
+
+    @classmethod
+    def _strip_positional_running_headers(
+        cls, page_lines: list[list[_Line]], page_heights: list[float]
+    ) -> list[list[_Line]]:
+        # A running header's text changes page to page (chapter title, page
+        # number), so text-frequency matching (strip_repeated_page_furniture)
+        # can't reliably catch it — but its vertical position is identical
+        # on every page it appears on. Confirmed live: a real running header
+        # sat at exactly the same `top` (to 0.1pt) on every affected page,
+        # distinct from front-matter and chapter-opener pages.
+        candidates = []
+        for i, lines in enumerate(page_lines):
+            if not lines or i >= len(page_heights) or page_heights[i] <= 0:
+                continue
+            first = lines[0]
+            if first.top / page_heights[i] <= _HEADER_BAND_HEIGHT_RATIO and len(first.text.split()) <= 8:
+                candidates.append((i, first.top))
+
+        min_pages = max(3, int(len(page_lines) * _HEADER_MIN_PAGE_RATIO))
+        if len(candidates) < min_pages:
+            return page_lines
+
+        tops = sorted(top for _, top in candidates)
+        median_top = tops[len(tops) // 2]
+        header_page_indices = {i for i, top in candidates if abs(top - median_top) <= _HEADER_BAND_TOLERANCE}
+        if len(header_page_indices) < min_pages:
+            return page_lines
+
+        return [lines[1:] if i in header_page_indices and lines else lines for i, lines in enumerate(page_lines)]
 
     def _extract_lines(self, page) -> list[_Line]:
         chars = page.chars
@@ -105,7 +148,7 @@ class PdfParser(BaseParser):
         lines: list[_Line] = []
         for row in rows:
             row_sorted = sorted(row, key=lambda c: c["x0"])
-            text = "".join(c["text"] for c in row_sorted).strip()
+            text = self._row_text(row_sorted).strip()
             if not text:
                 continue
             sizes = [c["size"] for c in row_sorted]
@@ -120,6 +163,25 @@ class PdfParser(BaseParser):
                 )
             )
         return lines
+
+    @staticmethod
+    def _row_text(row_sorted: list[dict]) -> str:
+        # Many PDFs (ebook conversions especially) position words with a
+        # horizontal gap instead of an explicit space glyph, so chars.text
+        # alone loses every word boundary. A gap over ~10% of the
+        # character's own size reliably means "next word" rather than
+        # kerning — confirmed live against a real file: intra-word gaps
+        # were ~0.001-0.003x size, word-boundary gaps ~0.26x size.
+        parts: list[str] = []
+        prev: dict | None = None
+        for ch in row_sorted:
+            if prev is not None:
+                gap = ch["x0"] - prev["x1"]
+                if gap > prev["size"] * 0.1 and not parts[-1].endswith(" ") and ch["text"] != " ":
+                    parts.append(" ")
+            parts.append(ch["text"])
+            prev = ch
+        return "".join(parts)
 
     def _dominant_size(self, lines: list[_Line]) -> float:
         # Round to the nearest 0.5pt so near-identical body sizes bucket together.

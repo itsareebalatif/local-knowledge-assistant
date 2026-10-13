@@ -24,7 +24,6 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     file_name: Mapped[str] = mapped_column(String(512), nullable=False)
     file_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    # Pre-chunking SHA-256 fingerprint — FR-1.4 checks this before parsing.
     hash_checksum: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -34,8 +33,4 @@ class Document(Base):
     )
     chunks: Mapped[list[Chunk]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
-    __table_args__ = (
-        # Same user re-uploading the identical file is a duplicate; different
-        # users may legitimately own copies of the same file.
-        UniqueConstraint("user_id", "hash_checksum", name="uq_document_user_hash"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "hash_checksum", name="uq_document_user_hash"),)

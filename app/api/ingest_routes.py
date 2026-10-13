@@ -1,12 +1,3 @@
-"""File ingestion endpoint (FR-1.1, Day-3 API surface).
-
-Wraps app.services.pipeline_service.ingest_index_and_graph — the exact same
-ingest -> embed -> graph pipeline `kengine ingest` uses — behind a multipart
-file upload. The in-memory graph is persisted to disk right after a
-successful ingest, so a later GET /graph (or a server restart) reflects
-what this call just added.
-"""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, UploadFile

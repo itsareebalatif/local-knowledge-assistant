@@ -1,17 +1,3 @@
-"""Pipeline 2: Prompt Synthesis, Grounded Generation & Citation (FR-4.5).
-
-Consumes the RetrievalOutcome Pipeline 1 (retrieval_service.py) already
-produced. If Pipeline 1 already refused, this yields a single refusal event
-and never touches the LLM — that separation (Pipeline 1 can veto Pipeline 2
-outright) is the entire point of the two-pipeline split, not something this
-function re-checks itself.
-
-Otherwise: builds the fact-restricted prompt, streams the answer piece by
-piece (so an API layer can forward it over SSE token-by-token), and once the
-full answer is assembled, runs the post-generation grounding verifier and
-builds citations before yielding the final event.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -23,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.llm.base import LLMBackend, LLMError
 from app.llm.citations import build_citations
 from app.llm.grounding_verifier import verify_grounding
-from app.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.llm.prompts import build_system_prompt, build_user_prompt
+from app.observability import observe, update
 from app.services.types import RetrievalOutcome
 
 logger = logging.getLogger(__name__)
@@ -40,17 +27,36 @@ async def generate_answer_stream(
     user_prompt, _marker_by_chunk_id = build_user_prompt(retrieval_outcome.query, candidates)
 
     answer_parts: list[str] = []
-    try:
-        async for piece in llm.generate_stream(SYSTEM_PROMPT, user_prompt):
-            answer_parts.append(piece)
-            yield {"type": "token", "text": piece}
-    except LLMError as exc:
-        logger.warning("LLM generation failed for query %r: %s", retrieval_outcome.query, exc)
-        yield {"type": "error", "message": str(exc)}
-        return
+    with observe("llm-generate", as_type="generation", model=llm.model, input=user_prompt) as gen_obs:
+        try:
+            async for piece in llm.generate_stream(build_system_prompt(), user_prompt):
+                answer_parts.append(piece)
+                yield {"type": "token", "text": piece}
+        except LLMError as exc:
+            logger.warning("LLM generation failed for query %r: %s", retrieval_outcome.query, exc)
+            update(gen_obs, level="ERROR", status_message=str(exc))
+            yield {"type": "error", "message": str(exc)}
+            return
 
-    full_answer = "".join(answer_parts)
-    verification = verify_grounding(full_answer, candidates)
+        full_answer = "".join(answer_parts)
+        # None for Ollama; update() drops None rather than sending a misleading zero
+        usage = getattr(llm, "last_usage", None)
+        update(gen_obs, output=full_answer, usage_details=usage)
+
+    with observe(
+        "grounding-verifier",
+        as_type="evaluator",
+        input={"answer": full_answer, "candidate_count": len(candidates)},
+    ) as obs:
+        verification = verify_grounding(full_answer, candidates)
+        update(
+            obs,
+            output={
+                "overall_coverage": verification.overall_coverage,
+                "unsupported_sentences": verification.unsupported_sentences,
+            },
+        )
+
     citations = build_citations(db, candidates)
 
     if verification.unsupported_sentences:
@@ -62,12 +68,22 @@ async def generate_answer_stream(
             verification.overall_coverage,
         )
 
+    grounding = {
+        "overall_coverage": verification.overall_coverage,
+        "unsupported_sentences": verification.unsupported_sentences,
+    }
+
+    # Every sentence failed grounding — the model answered from its own
+    # knowledge rather than the retrieved chunks. `overall_coverage is None`
+    # is the deliberate "I don't know" case (see grounding_verifier) and is
+    # already a safe non-answer, not a hallucination to catch here.
+    if verification.sentences and len(verification.unsupported_sentences) == len(verification.sentences):
+        yield {"type": "refused", "reason": "ungrounded_answer", "metrics": grounding}
+        return
+
     yield {
         "type": "done",
         "answer": full_answer,
         "citations": [asdict(c) for c in citations],
-        "grounding": {
-            "overall_coverage": verification.overall_coverage,
-            "unsupported_sentences": verification.unsupported_sentences,
-        },
+        "grounding": grounding,
     }

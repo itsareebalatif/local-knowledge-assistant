@@ -65,7 +65,9 @@ def _openai() -> OpenAICompatibleLLM:
 # different settings — adding a new OpenAI-compatible provider (Together,
 # Fireworks, a self-hosted vLLM server, etc.) means adding one factory
 # function above plus its *_api_key/*_base_url/*_model settings in
-# app/config.py, never a new backend class.
+# app/config.py, never a new backend class. Only "local" is a different
+# class, because Ollama genuinely speaks a different wire protocol, not
+# because it needed separate code for the same protocol.
 _PROVIDERS: dict[str, Callable[[], LLMBackend]] = {
     "local": OllamaLLM,
     "groq": _groq,

@@ -1,19 +1,20 @@
-"""Shared keyword-coverage helpers, used by both the pre-retrieval grounding
-gate (app/search/grounding_gate.py — does the query's vocabulary show up in
-retrieved chunks?) and the post-generation grounding verifier
-(app/llm/grounding_verifier.py — does each generated sentence's vocabulary
-show up in the retrieved context?). Same underlying question, two different
-places it needs asking, so the logic lives once.
-"""
-
 from __future__ import annotations
 
 import re
 
-_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+# [^\W_]+ excludes underscore (unlike \w+) so snake_case terms tokenize as separate words.
+_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 
-# Small, deliberately unsurprising stopword list — good enough to strip noise
-# words from a short query/sentence without pulling in a whole NLP dependency.
+# Inserts camelCase boundaries before lowercasing; acronym rule must run after the simple one.
+_CAMEL_BOUNDARY_SIMPLE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_CAMEL_BOUNDARY_ACRONYM = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _tokenize(text: str) -> list[str]:
+    text = _CAMEL_BOUNDARY_SIMPLE.sub(" ", text)
+    text = _CAMEL_BOUNDARY_ACRONYM.sub(" ", text)
+    return _TOKEN_PATTERN.findall(text.lower())
+
 STOPWORDS = {
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
     "do", "does", "did", "what", "which", "who", "whom", "this", "that",
@@ -26,17 +27,28 @@ STOPWORDS = {
 
 
 def significant_terms(text: str) -> list[str]:
-    """Lowercased content words: stopwords and very short tokens dropped."""
-    tokens = _TOKEN_PATTERN.findall(text.lower())
+    tokens = _tokenize(text)
     return [t for t in tokens if t not in STOPWORDS and len(t) > 2]
 
 
+def _simple_stem(word: str) -> str:
+    # Heuristic plural stripping (model/models, table/tables) — not a real lemmatizer.
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("es") and len(word) > 3:
+        # "-es" only strips a real s/x/z/ch/sh plural; otherwise just drop the trailing "s".
+        stripped = word[:-2]
+        if stripped.endswith(("s", "x", "z", "ch", "sh")):
+            return stripped
+        return word[:-1]
+    if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
 def term_coverage(terms: list[str], reference_text: str) -> float:
-    """Fraction of `terms` that appear as whole words in `reference_text`.
-    1.0 (not penalized) when `terms` is empty — coverage can't meaningfully
-    be judged against zero significant words."""
     if not terms:
         return 1.0
-    haystack = reference_text.lower()
-    matched = sum(1 for term in terms if re.search(rf"\b{re.escape(term)}\b", haystack))
+    haystack_words = {_simple_stem(w) for w in _tokenize(reference_text)}
+    matched = sum(1 for term in terms if _simple_stem(term) in haystack_words)
     return matched / len(terms)

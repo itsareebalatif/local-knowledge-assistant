@@ -33,6 +33,18 @@ class CooccurrenceGraphBuilder:
             else:
                 self.graph.add_edge(key_a, key_b, weight=1)
 
+    def remove_chunks(self, chunk_ids: set[int]) -> None:
+        # Nodes are shared across users/documents (see graph_expansion.py), so a node
+        # is dropped only once no chunk_ids reference it at all, not on first mention removed.
+        empty_nodes = []
+        for key, data in self.graph.nodes(data=True):
+            remaining = [cid for cid in data.get("chunk_ids", []) if cid not in chunk_ids]
+            if remaining != data["chunk_ids"]:
+                data["chunk_ids"] = remaining
+            if not remaining:
+                empty_nodes.append(key)
+        self.graph.remove_nodes_from(empty_nodes)
+
     def neighbors(self, name: str, entity_type: str) -> list[str]:
         key = _node_key(name, entity_type)
         if key not in self.graph:
@@ -41,7 +53,6 @@ class CooccurrenceGraphBuilder:
 
     @staticmethod
     def node_key(name: str, entity_type: str) -> str:
-        
         return _node_key(name, entity_type)
 
     def save(self, path: str | Path) -> None:

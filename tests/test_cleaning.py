@@ -23,7 +23,7 @@ def test_strip_repeated_page_furniture_removes_running_header_and_footer():
     assert len(cleaned) == 3
     for page in cleaned:
         assert "CONFIDENTIAL" not in page
-        assert "Page" not in page  # page-number lines stripped via is_page_number_line too
+        assert "Page" not in page
     assert "Introduction to the product." in cleaned[0]
     assert "Architecture overview goes here." in cleaned[1]
 
@@ -36,12 +36,27 @@ def test_strip_repeated_page_furniture_keeps_content_that_is_not_repeated():
 
 
 def test_strip_repeated_page_furniture_skips_dedup_under_three_pages():
-    # Fewer than 3 pages: even a line repeated on every page is left alone —
-    # too small a sample to safely call it "furniture" rather than real content.
-    pages = ["Shared line\nReal content A", "Shared line\nReal content B"]
+    pages =["Shared line\nReal content A", "Shared line\nReal content B"]
     cleaned = strip_repeated_page_furniture(pages)
     assert "Shared line" in cleaned[0]
     assert "Shared line" in cleaned[1]
+
+
+def test_strip_repeated_page_furniture_matches_a_running_header_despite_its_changing_page_number():
+    # Regression: a real running header's page number differs every time
+    # ("Chapter Title 21" vs "Chapter Title 23"), so exact-line matching
+    # never recognized it as repeated furniture — confirmed live against a
+    # real PDF where this left the header glued onto the next paragraph.
+    pages = [
+        "Chapter Title 21\nFirst page of real content here.",
+        "Chapter Title 23\nSecond page of real content here.",
+        "Chapter Title 27\nThird page of real content here.",
+    ]
+    cleaned = strip_repeated_page_furniture(pages)
+    for page in cleaned:
+        assert "Chapter Title" not in page
+    assert "First page of real content here." in cleaned[0]
+    assert "Third page of real content here." in cleaned[2]
 
 
 def test_normalize_text_collapses_whitespace_and_control_chars():

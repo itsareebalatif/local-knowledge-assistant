@@ -5,10 +5,6 @@ from app.embeddings.vector_store import ChromaVectorStore, VectorStore
 
 
 def get_embedder_backend(name: str | None = None):
-    """Picks Ollama (local, default) or Cohere (opt-in cloud) based on
-    Settings.embedding_backend — the embedding-side equivalent of
-    app.llm.get_llm_backend(), so the rest of the app depends only on the
-    shared `embed(texts, input_type=...)` interface, never a provider."""
     backend = (name or get_settings().embedding_backend).lower()
     if backend == "ollama":
         return OllamaEmbedder()

@@ -1,10 +1,3 @@
-"""SQLAlchemy engine/session setup.
-
-SQLite is the default per the SRS (Section 5.2 / 6.4 NFR-9 — swappable
-storage), but DATABASE_URL can point at Postgres/MySQL later without
-touching the models.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,8 +10,6 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# SQLite stores its file relative to the project root — make sure the parent
-# directory exists before the engine tries to open it.
 if settings.is_sqlite:
     db_path = settings.database_url.split("sqlite:///", 1)[-1]
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -41,11 +32,10 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 
 class Base(DeclarativeBase):
-    """Shared declarative base for every ORM model in app/db/models.py."""
+    pass
 
 
 def get_db():
-    """FastAPI dependency: yields a session and always closes it."""
     db = SessionLocal()
     try:
         yield db

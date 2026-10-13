@@ -27,10 +27,8 @@ def test_returns_up_to_top_k_ordered_by_relevance(db_session, make_chunk, user):
 
 def test_query_with_punctuation_does_not_crash_fts5(db_session, make_chunk, user):
     make_chunk("Ollama runs qwen2.5:3b entirely offline.")
-    # A raw query containing FTS5-special characters (quotes, colon, "OR")
-    # must not raise — this is exactly what the token-quoting is for.
     hits = bm25_search(db_session, 'qwen2.5:3b OR "malicious" NOT chunks', top_k=5, user_id=user.user_id)
-    assert isinstance(hits, list)  # no exception is the actual assertion here
+    assert isinstance(hits, list)
 
 
 def test_empty_or_meaningless_query_returns_no_hits(db_session, make_chunk, user):
@@ -38,6 +36,21 @@ def test_empty_or_meaningless_query_returns_no_hits(db_session, make_chunk, user
     assert bm25_search(db_session, "", top_k=5, user_id=user.user_id) == []
     assert bm25_search(db_session, "   ", top_k=5, user_id=user.user_id) == []
     assert bm25_search(db_session, "!!!???", top_k=5, user_id=user.user_id) == []
+
+
+def test_snake_case_query_matches_the_spaced_words_in_real_text(db_session, make_chunk, user):
+    # Regression: old \w+ tokenizer treated "freelancer_marketplace" as one token, never matching the spaced words.
+    relevant = make_chunk("The Freelancer Marketplace API connects clients and freelancers.")
+    hits = bm25_search(db_session, "freelancer_marketplace", top_k=5, user_id=user.user_id)
+    assert len(hits) == 1
+    assert hits[0].chunk_id == relevant.chunk_id
+
+
+def test_camel_case_query_matches_the_spaced_words_in_real_text(db_session, make_chunk, user):
+    relevant = make_chunk("4.2 Data Flow Diagram (DFD Level 1) shows how data moves through the system.")
+    hits = bm25_search(db_session, "DataFlowDiagram", top_k=5, user_id=user.user_id)
+    assert len(hits) == 1
+    assert hits[0].chunk_id == relevant.chunk_id
 
 
 def test_no_matching_content_returns_empty_list(db_session, make_chunk, user):
