@@ -93,7 +93,6 @@ packaging==26.3
 pandas==2.3.3
 pdfminer.six==20260107
 pdfplumber==0.11.10
--e git+https://github.com/itsareebalatif/local-knowledge-assistant.git@34e81f107f8602b02323f1221c6d2e38ece384cb#egg=personal_knowledge_engine
 pillow==12.3.0
 pluggy==1.6.0
 posthog==7.60.1

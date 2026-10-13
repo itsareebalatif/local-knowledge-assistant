@@ -28,7 +28,7 @@ jobs:
           # Download spacy language model directly via spacy cli
           python -m spacy download en_core_web_sm
           pip install pytest ruff
-          
+
       - name: Lint and check syntax
         run: ruff check .
 
@@ -36,3 +36,5 @@ jobs:
         env:
           OPENAI_API_KEY: "mock-key-for-unit-tests"
         run: pytest -q
+
+        
