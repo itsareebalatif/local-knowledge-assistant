@@ -58,6 +58,13 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Without this, `import app` only works by accident locally — dev machines
+# that ran `pip install -e .` at some point have it registered on sys.path
+# regardless of how pytest is invoked, but a fresh CI checkout installing
+# only from requirements.txt has nothing providing it. This makes pytest
+# add the repo root to sys.path itself, independent of whether the package
+# is pip-installed at all, so collection works the same everywhere.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 120
