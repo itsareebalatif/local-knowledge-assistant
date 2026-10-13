@@ -54,8 +54,25 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_timeout_seconds: float = 60.0
 
+    # --- Optional cloud LLM: OpenAI ---
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_seconds: float = 60.0
+
     # --- Generation (Pipeline 2) ---
-    llm_backend: str = "local"  # "local" (Ollama) | "groq" | "gemini"
+    # To switch providers or models: change this value and the matching
+    # *_model setting above (e.g. GROQ_MODEL, OPENAI_MODEL) — never code.
+    # Groq, Gemini, and OpenAI all speak the same OpenAI-compatible wire
+    # format and share one implementation (app/llm/openai_compatible_backend.py);
+    # adding a new OpenAI-compatible provider is a new entry in the registry
+    # in app/llm/__init__.py, not a new backend class.
+    llm_backend: str = "local"  # "local" (Ollama) | "groq" | "gemini" | "openai"
+    # The same retrieved context should produce the same answer, not a
+    # different one each run — temperature 0 plus a fixed seed (where the
+    # provider honors it; Gemini's endpoint rejects the seed field outright).
+    llm_temperature: float = 0.0
+    llm_seed: int = 42
     # The evaluation harness's LLM-as-judge call (context precision) can use
     # a different backend than live generation — e.g. Gemini's free tier for
     # judging, Groq or local Ollama for real user queries. Defaults to

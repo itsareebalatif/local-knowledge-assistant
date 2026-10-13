@@ -222,7 +222,7 @@ class FakeVectorStore:
 
 
 class FakeLLM:
-    """Deterministic stand-in for OllamaLLM/GroqLLM — no network, no live
+    """Deterministic stand-in for OllamaLLM/OpenAICompatibleLLM — no network, no live
     model server needed. Yields a fixed list of pieces and records every
     (system_prompt, user_prompt) call for assertions."""
 
