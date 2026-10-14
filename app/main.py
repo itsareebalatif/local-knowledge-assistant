@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.auth_routes import router as auth_router
@@ -57,6 +58,19 @@ app.include_router(graph_router, prefix="/api")
 app.include_router(chunk_router, prefix="/api")
 app.include_router(document_router, prefix="/api")
 app.include_router(conversation_router, prefix="/api")
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    # The dashboard is mounted at /ui, not "/", so it can't shadow /api/*,
+    # /docs, or /redoc (see the mount below) — but that means the bare root
+    # URL had no route at all and 404'd, which is what a deployed app's
+    # visitors actually land on first. Confirmed live: that looked like "the
+    # site only shows Swagger," since /docs is the one thing that *did*
+    # resolve. This sends a real visitor straight to the dashboard without
+    # taking the path away from anything else.
+    return RedirectResponse(url="/ui/")
+
 
 # Mounted under /ui, not "/", so it can't shadow /api/*, /docs, or /redoc.
 _static_dir = Path(__file__).resolve().parent / "static"
