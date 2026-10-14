@@ -36,10 +36,10 @@ async def _traced_bm25(db: Session, query: str, top_k: int, user_id: int) -> lis
 
 
 async def _traced_vector(
-    embedder: EmbedderBackend, vector_store: VectorStore, query: str, top_k: int, user_id: int
+    db: Session, embedder: EmbedderBackend, vector_store: VectorStore, query: str, top_k: int, user_id: int
 ) -> list[CandidateChunk]:
     with observe("vector-search", as_type="retriever", input={"query": query}) as obs:
-        hits = await vector_search(embedder, vector_store, query, top_k, user_id)
+        hits = await vector_search(db, embedder, vector_store, query, top_k, user_id)
         update(obs, output={"num_hits": len(hits), "chunk_ids": _chunk_ids(hits)})
         return hits
 
@@ -73,7 +73,7 @@ async def retrieve_and_verify(
     # user_id is required on all three sources for per-user data isolation
     bm25_hits, vector_hits, graph_hits = await asyncio.gather(
         _traced_bm25(db, query, settings.bm25_top_k, user_id),
-        _traced_vector(embedder, vector_store, query, settings.vector_top_k, user_id),
+        _traced_vector(db, embedder, vector_store, query, settings.vector_top_k, user_id),
         _traced_graph(db, graph_builder, extractor, query, settings.graph_top_k, user_id),
     )
 

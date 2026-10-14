@@ -83,7 +83,7 @@ async def evaluate_retrieval(
     for case in cases:
         bm25_hits, vector_hits, graph_hits = await asyncio.gather(
             asyncio.to_thread(bm25_search, db, case.query, settings.bm25_top_k, user_id),
-            vector_search(embedder, vector_store, case.query, settings.vector_top_k, user_id),
+            vector_search(db, embedder, vector_store, case.query, settings.vector_top_k, user_id),
             asyncio.to_thread(expand_via_graph, db, graph_builder, extractor, case.query, settings.graph_top_k, user_id),
         )
         fused = reciprocal_rank_fusion(

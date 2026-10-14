@@ -71,12 +71,12 @@ async def test_query_prints_streamed_tokens_and_sources(
         documents=[chunk.content],
         metadatas=[{"doc_id": chunk.doc_id, "chunk_id": chunk.chunk_id, "user_id": owner.user_id}],
     )
-    fake_llm.pieces = ["Ollama ", "runs ", "locally."]
+    fake_llm.pieces = ["Ollama ", "runs ", "locally ", "[1]."]
 
     await cli._cmd_query(SimpleNamespace(question="What does Ollama run models on?", user_id=None))
 
     out = capsys.readouterr().out
-    assert "Ollama runs locally." in out
+    assert "Ollama runs locally [1]." in out
     assert "Sources:" in out
 
 

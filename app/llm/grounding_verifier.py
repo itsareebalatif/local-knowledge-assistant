@@ -9,14 +9,7 @@ from app.search.types import CandidateChunk
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 
-# The system prompt explicitly tells the model to use this phrasing when it
-# can't answer from the context (app/llm/prompts.py). A refusal makes no
-# factual claims, so scoring its keyword overlap against the context is
-# meaningless — "know"/"don't" are common enough to trivially match almost
-# any real passage, which previously made a plain "I don't know." show up
-# as "100% grounded" (confirmed live: it did). Only short answers are
-# checked so this can't suppress verification of a longer answer that
-# merely mentions uncertainty in passing.
+
 _NO_ANSWER_PATTERN = re.compile(
     r"\b(i\s+don'?t\s+know|i\s+do\s+not\s+know|not\s+enough\s+information|cannot\s+determine|can'?t\s+determine)\b",
     re.IGNORECASE,

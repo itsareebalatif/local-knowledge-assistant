@@ -40,7 +40,16 @@ class ChromaVectorStore(VectorStore):
     def add(self, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
         if not ids:
             return
-        self._collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+        # upsert, not add: Chroma's add() silently keeps whatever's already
+        # stored under a given id and drops the new write — no error, no
+        # warning surfaced to the caller (only a log line). Confirmed live:
+        # this id scheme is `chunk-{chunk_id}`, a plain SQL autoincrement
+        # integer, which is not permanently unique — it gets reused whenever
+        # the SQL database is reset/recreated independently of this (separate,
+        # persistent) vector store. A reused id then silently kept serving
+        # another user's stale content indefinitely. upsert() makes a write
+        # always reflect what was actually just ingested.
+        self._collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
     def query(self, embedding: list[float], top_k: int = 5, where: dict | None = None) -> list[dict]:
         result = self._collection.query(query_embeddings=[embedding], n_results=top_k, where=where)

@@ -50,7 +50,7 @@ def test_query_stream_returns_grounded_answer_with_citations(
         documents=[chunk.content],
         metadatas=[{"doc_id": chunk.doc_id, "chunk_id": chunk.chunk_id, "user_id": registered_user.user.user_id}],
     )
-    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally."]
+    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally ", "[1]."]
 
     _override_all(db_session, fake_embedder, fake_vector_store, CooccurrenceGraphBuilder(), SpacyEntityExtractor(), fake_llm)
     try:
@@ -110,7 +110,7 @@ def test_query_non_streaming_returns_one_json_response(
         documents=[chunk.content],
         metadatas=[{"doc_id": chunk.doc_id, "chunk_id": chunk.chunk_id, "user_id": registered_user.user.user_id}],
     )
-    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally."]
+    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally ", "[1]."]
 
     _override_all(db_session, fake_embedder, fake_vector_store, CooccurrenceGraphBuilder(), SpacyEntityExtractor(), fake_llm)
     try:
@@ -225,7 +225,7 @@ def test_query_without_a_conversation_id_creates_a_new_conversation(
         documents=[chunk.content],
         metadatas=[{"doc_id": chunk.doc_id, "chunk_id": chunk.chunk_id, "user_id": registered_user.user.user_id}],
     )
-    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally."]
+    fake_llm.pieces = ["Ollama ", "runs ", "models ", "locally ", "[1]."]
 
     _override_all(db_session, fake_embedder, fake_vector_store, CooccurrenceGraphBuilder(), SpacyEntityExtractor(), fake_llm)
     try:

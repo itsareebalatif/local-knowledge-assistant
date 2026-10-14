@@ -19,7 +19,7 @@ async def test_grounded_outcome_streams_tokens_then_final_event(db_session, make
     chunk = make_chunk("Ollama runs language models locally on your machine.")
     candidate = CandidateChunk(chunk_id=chunk.chunk_id, doc_id=chunk.doc_id, content=chunk.content, score=1.0)
     outcome = RetrievalOutcome(query="what does Ollama do?", status="grounded", candidates=[candidate])
-    fake_llm.pieces = ["Ollama ", "runs ", "language ", "models ", "locally."]
+    fake_llm.pieces = ["Ollama ", "runs ", "language ", "models ", "locally ", "[1]."]
 
     events = [e async for e in generate_answer_stream(db_session, fake_llm, outcome)]
 
@@ -28,7 +28,7 @@ async def test_grounded_outcome_streams_tokens_then_final_event(db_session, make
 
     final = events[-1]
     assert final["type"] == "done"
-    assert final["answer"] == "Ollama runs language models locally."
+    assert final["answer"] == "Ollama runs language models locally [1]."
     assert len(final["citations"]) == 1
     assert final["citations"][0]["marker"] == 1
     assert "overall_coverage" in final["grounding"]

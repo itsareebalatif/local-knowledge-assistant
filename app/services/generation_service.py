@@ -57,7 +57,7 @@ async def generate_answer_stream(
             },
         )
 
-    citations = build_citations(db, candidates)
+    citations = build_citations(db, candidates, full_answer)
 
     if verification.unsupported_sentences:
         logger.info(
