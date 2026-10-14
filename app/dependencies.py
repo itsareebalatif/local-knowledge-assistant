@@ -1,12 +1,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.auth.auth_service import get_user_by_token
-from app.db.base import get_db  # re-exported so routes import everything from here
+from app.db.base import SessionLocal, get_db  # re-exported so routes import everything from here
 from app.embeddings.embedder import EmbedderBackend
 from app.embeddings.vector_store import VectorStore
 from app.graph.entity_extractor import SpacyEntityExtractor
@@ -25,8 +27,17 @@ __all__ = [
     "get_graph_builder",
     "get_llm",
     "get_reranker",
+    "get_session_factory",
     "get_vector_store",
 ]
+
+
+def get_session_factory() -> Callable[[], Session]:
+    # For background tasks that outlive the request: they can't share the
+    # request-scoped `get_db` session, but still need to land in the same
+    # database, so tests override this (not a hardcoded SessionLocal import)
+    # to point background work at their isolated per-test engine too.
+    return SessionLocal
 
 
 def get_embedder(request: Request) -> EmbedderBackend:

@@ -202,11 +202,15 @@ def render_upload_sidebar() -> None:
             for uploaded in uploaded_files:
                 with st.spinner(f"Ingesting {uploaded.name}..."):
                     try:
+                        # The API queues the file and returns immediately (202) —
+                        # parsing/embedding runs in a background task now, so a
+                        # large book-length file can't block this request long
+                        # enough to trip a hosting platform's proxy timeout.
                         response = api_post(
                             "/api/ingest",
                             files={"file": (uploaded.name, uploaded.getvalue())},
                             authed=True,
-                            timeout=120,  # parsing + embedding a real document can take a while
+                            timeout=30,
                         )
                     except requests.RequestException as exc:
                         st.error(f"{uploaded.name}: could not reach the API: {exc}")
@@ -215,8 +219,16 @@ def render_upload_sidebar() -> None:
                     if response.status_code == 401:
                         _handle_expired_session()
                         return
+                    if response.status_code != 202:
+                        detail = response.json().get("detail", response.text) if response.content else response.text
+                        st.error(f"{uploaded.name}: {detail}")
+                        continue
 
-                    data = response.json()
+                    job_id = response.json()["job_id"]
+                    data = _poll_ingest_job(uploaded.name, job_id)
+                    if data is None:
+                        continue
+
                     status = data.get("status")
                     if status == "ingested":
                         st.success(
@@ -227,8 +239,33 @@ def render_upload_sidebar() -> None:
                         st.info(f"{uploaded.name}: already ingested.")
                     elif status == "unsupported":
                         st.warning(f"{uploaded.name}: unsupported file type.")
+                    elif status == "processing":
+                        st.warning(f"{uploaded.name}: still processing — check back later.")
                     else:
                         st.error(f"{uploaded.name}: {data.get('error') or status}")
+
+
+def _poll_ingest_job(filename: str, job_id: int, max_attempts: int = 150) -> dict | None:
+    # ~5 minutes at 2s each — generous for a large book-length file.
+    for _ in range(max_attempts):
+        time.sleep(2)
+        try:
+            response = api_get(f"/api/ingest/{job_id}")
+        except requests.RequestException as exc:
+            st.error(f"{filename}: could not reach the API while checking status: {exc}")
+            return None
+
+        if response.status_code == 401:
+            _handle_expired_session()
+            return None
+        if response.status_code != 200:
+            st.error(f"{filename}: status check failed ({response.status_code}).")
+            return None
+
+        data = response.json()
+        if data["status"] != "processing":
+            return data
+    return {"status": "processing"}
 
 
 def render_documents_sidebar() -> None:

@@ -201,17 +201,58 @@ async function uploadFile(file) {
 
   try {
     const res = await authFetch("/api/ingest", { method: "POST", body: formData });
+    // Ingestion is queued, not done synchronously — large files parse/embed
+    // in the background now so one slow upload can't tie up the request
+    // long enough to trip a hosting platform's proxy timeout. A non-JSON
+    // response (e.g. a proxy's own timeout/error page) is handled instead
+    // of crashing on res.json().
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      statusEl.textContent = `error: upload failed (${res.status})`;
+      statusEl.className = "status status-error";
+      console.error("ingest request failed", res.status, text);
+      return;
+    }
+    const accepted = await res.json();
+    statusEl.textContent = "processing…";
+    statusEl.className = "status status-processing";
+    await pollIngestJob(accepted.job_id, statusEl);
+  } catch (err) {
+    statusEl.textContent = `error: ${err}`;
+    statusEl.className = "status status-error";
+  }
+}
+
+async function pollIngestJob(jobId, statusEl) {
+  const maxAttempts = 150; // ~5 minutes at 2s each, generous for a large book-length file
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await sleep(2000);
+    let res;
+    try {
+      res = await authFetch(`/api/ingest/${jobId}`);
+    } catch (err) {
+      statusEl.textContent = `error checking status: ${err}`;
+      statusEl.className = "status status-error";
+      return;
+    }
+    if (!res.ok) {
+      statusEl.textContent = `error: status check failed (${res.status})`;
+      statusEl.className = "status status-error";
+      return;
+    }
     const data = await res.json();
+    if (data.status === "processing") continue;
+
     statusEl.textContent = summarizeIngest(data);
     statusEl.className = `status status-${data.status}`;
     if (data.status === "ingested") {
       loadGraph();
       loadDocuments();
     }
-  } catch (err) {
-    statusEl.textContent = `error: ${err}`;
-    statusEl.className = "status status-error";
+    return;
   }
+  statusEl.textContent = "still processing — check back later";
+  statusEl.className = "status status-processing";
 }
 
 async function loadDocuments() {

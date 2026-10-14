@@ -54,6 +54,23 @@ class IngestResponse(BaseModel):
     error: str | None = None
 
 
+class IngestJobAccepted(BaseModel):
+    job_id: int
+    status: str = "processing"
+
+
+class IngestJobOut(BaseModel):
+    job_id: int
+    filename: str
+    status: str  # "processing" | "ingested" | "duplicate_file" | "unsupported" | "parse_failed" | "error"
+    document_id: int | None = None
+    total_chunks: int = 0
+    new_chunks: int = 0
+    reused_chunks: int = 0
+    warnings: list[str] = []
+    error: str | None = None
+
+
 class CitationOut(BaseModel):
     marker: int
     chunk_id: int

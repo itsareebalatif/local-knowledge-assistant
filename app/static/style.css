@@ -119,6 +119,7 @@ main {
 
 .status-ingested { color: #2a9d5c; }
 .status-duplicate_file { color: #c98a1d; }
+.status-processing { color: #6b7280; }
 .status-error, .status-unsupported, .status-parse_failed { color: #c0392b; }
 
 .delete-doc-btn {

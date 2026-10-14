@@ -3,6 +3,7 @@ from app.models.chunk_entity_junction import ChunkEntityJunction
 from app.models.conversation import Conversation
 from app.models.document import Document
 from app.models.entity_node import EntityNode
+from app.models.ingest_job import IngestJob
 from app.models.message import Message
 from app.models.metadata import DocumentMetadata
 from app.models.relation_edge import RelationEdge
@@ -16,6 +17,7 @@ __all__ = [
     "Document",
     "DocumentMetadata",
     "EntityNode",
+    "IngestJob",
     "Message",
     "RelationEdge",
     "User",
