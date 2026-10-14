@@ -1,0 +1,52 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Environment / secrets — never baked into an image, passed at runtime ---
+.env
+.env.*
+!.env.example
+
+# --- Local data — never shipped in the image, mounted as a volume instead ---
+data/
+*.sqlite3
+*.db
+chroma/
+
+# --- Version control / CI ---
+.git/
+.github/
+
+# --- Tests / dev tooling — not needed to run the app ---
+tests/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Things this image doesn't need at all ---
+streamlit_app.py
+run_dev.sh
+requirements.txt
+requirements.lock.txt
+golden.json
+scripts/
+*.pdf
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+
+# --- Docs (irrelevant inside the image) ---
+README.md
+*.md

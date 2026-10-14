@@ -186,39 +186,49 @@ def _submit_auth(path: str, payload: dict) -> None:
 def render_upload_sidebar() -> None:
     with st.sidebar:
         st.header("Documents")
-        uploaded = st.file_uploader(
-            "Upload a PDF, Markdown, HTML, DOCX, or TXT file", type=["pdf", "md", "markdown", "html", "htm", "docx", "txt"]
+        # accept_multiple_files=True — without it, st.file_uploader silently
+        # keeps only the last file selected/dropped and drops the rest, no
+        # error, no warning. Confirmed live: that's exactly what looked like
+        # "only the most recent upload went through."
+        uploaded_files = st.file_uploader(
+            "Upload PDF, Markdown, HTML, DOCX, or TXT files",
+            type=["pdf", "md", "markdown", "html", "htm", "docx", "txt"],
+            accept_multiple_files=True,
         )
-        if uploaded is not None and st.button("Ingest", use_container_width=True):
-            with st.spinner(f"Ingesting {uploaded.name}..."):
-                try:
-                    response = api_post(
-                        "/api/ingest",
-                        files={"file": (uploaded.name, uploaded.getvalue())},
-                        authed=True,
-                        timeout=120,  # parsing + embedding a real document can take a while
-                    )
-                except requests.RequestException as exc:
-                    st.error(f"Could not reach the API: {exc}")
-                    return
+        if uploaded_files and st.button("Ingest", use_container_width=True):
+            # One request per file — the API only ever accepts one file per
+            # call (see app/api/ingest_routes.py) — same pattern the
+            # dashboard (app/static/app.js) already uses for this.
+            for uploaded in uploaded_files:
+                with st.spinner(f"Ingesting {uploaded.name}..."):
+                    try:
+                        response = api_post(
+                            "/api/ingest",
+                            files={"file": (uploaded.name, uploaded.getvalue())},
+                            authed=True,
+                            timeout=120,  # parsing + embedding a real document can take a while
+                        )
+                    except requests.RequestException as exc:
+                        st.error(f"{uploaded.name}: could not reach the API: {exc}")
+                        continue
 
-                if response.status_code == 401:
-                    _handle_expired_session()
-                    return
+                    if response.status_code == 401:
+                        _handle_expired_session()
+                        return
 
-                data = response.json()
-                status = data.get("status")
-                if status == "ingested":
-                    st.success(
-                        f"{data['total_chunks']} chunks "
-                        f"({data['new_chunks']} new, {data['reused_chunks']} reused embeddings)"
-                    )
-                elif status == "duplicate_file":
-                    st.info("Already ingested.")
-                elif status == "unsupported":
-                    st.warning("Unsupported file type.")
-                else:
-                    st.error(data.get("error") or status)
+                    data = response.json()
+                    status = data.get("status")
+                    if status == "ingested":
+                        st.success(
+                            f"{uploaded.name}: {data['total_chunks']} chunks "
+                            f"({data['new_chunks']} new, {data['reused_chunks']} reused embeddings)"
+                        )
+                    elif status == "duplicate_file":
+                        st.info(f"{uploaded.name}: already ingested.")
+                    elif status == "unsupported":
+                        st.warning(f"{uploaded.name}: unsupported file type.")
+                    else:
+                        st.error(f"{uploaded.name}: {data.get('error') or status}")
 
 
 def render_documents_sidebar() -> None:

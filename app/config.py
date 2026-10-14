@@ -128,6 +128,15 @@ class Settings(BaseSettings):
     mmr_top_k: int = 5
     mmr_lambda: float = 0.7  # tuned live — 0.6 let an unrelated chunk win on diversity
 
+    # --- Retrieval: broad/enumerative queries ("list every X") ---
+    # A fixed top-k is built for "find the single best match," not "find
+    # every relevant mention" — confirmed live that a detail scattered
+    # outside the default top 5 just never reached the LLM, not that it was
+    # ranked and rejected. is_broad_query() (app/search/keyword_utils.py)
+    # detects this class of question and multiplies every top-k in the
+    # pipeline by this factor for that one query, not globally.
+    broad_query_top_k_multiplier: int = 3
+
     # --- Observability: Langfuse tracing (optional — leave blank to disable) ---
     langfuse_secret_key: str | None = None
     langfuse_public_key: str | None = None

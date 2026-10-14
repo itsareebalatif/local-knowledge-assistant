@@ -71,7 +71,32 @@ class RouteDecision:
 def _build_router_prompt(query: str, recent_messages: list[Message]) -> str:
     history_lines = [f"{'User' if m.role == 'user' else 'Assistant'}: {m.content}" for m in recent_messages]
     history_text = "\n".join(history_lines)
-    return f"Recent conversation:\n{history_text}\n\nLatest question: {query}"
+    prompt = f"Recent conversation:\n{history_text}\n\nLatest question: {query}"
+
+    # Resolving a pronoun against the conversation's own recorded answer can
+    # fail when that answer's phrasing doesn't happen to restate the exact
+    # noun a later "it"/"them" needs — confirmed live: an answer said "Hagrid
+    # brought the baby on the motorcycle" without repeating "the motorbike"
+    # as the specific thing that was borrowed, so a later "where did he get
+    # it?" had two candidate nouns (the baby, the motorcycle) to resolve
+    # against and picked the wrong one. The real cited source text doesn't
+    # have that ambiguity — grounding resolution in it instead of just the
+    # paraphrase closes the gap. Only the most recent assistant turn's
+    # citations are used, matching "most recent exchange" elsewhere in this
+    # prompt — older turns' sources would be a less relevant distraction.
+    last_assistant_citations = next(
+        (m.citations for m in reversed(recent_messages) if m.role == "assistant" and m.citations), None
+    )
+    if last_assistant_citations:
+        snippets = [c["snippet"] for c in last_assistant_citations if c.get("snippet")]
+        if snippets:
+            sources_text = "\n".join(f"- {s}" for s in snippets)
+            prompt += (
+                "\n\nSource passages the most recent answer was actually grounded in "
+                "(use these — not just the paraphrased answer above — to resolve any "
+                f"pronoun or implicit reference in the latest question):\n{sources_text}"
+            )
+    return prompt
 
 
 _WRAPPING_CHARS = "<>\"'*. \t"

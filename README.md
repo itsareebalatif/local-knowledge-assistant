@@ -129,6 +129,23 @@ streamlit run streamlit_app.py       # opens at http://localhost:8501
 ./run_dev.sh
 ```
 
+### Or with Docker
+
+```bash
+docker compose up --build
+```
+
+Builds a lean image — **778MB measured**, no cross-encoder reranker — and runs it with `data/` mounted as a volume, so the SQLite DB, vector store, and graph survive container restarts. Config comes from `.env` (copy `.env.example` first, same as the non-Docker setup). If `LLM_BACKEND`/`EMBEDDING_BACKEND` is `local`, point `OLLAMA_BASE_URL` at an Ollama reachable from inside the container (`http://host.docker.internal:11434` on macOS/Windows Docker Desktop) — Ollama isn't bundled, on purpose: its own image and model downloads would work directly against the whole point of keeping this image small.
+
+The reranker (`sentence-transformers` + `transformers` + `torch`) is excluded by default — it's **~650-700MB on its own**, by far the single heaviest dependency in this project, for one optional relevance improvement. Retrieval falls back to RRF's own ordering without it, not a degraded mode. To include it anyway:
+
+```bash
+docker build --build-arg INSTALL_EXTRAS=rerank -t pke:full .
+docker run -e RERANK_ENABLED=true ... pke:full
+```
+
+See the comments in `Dockerfile` and `docker-compose.yml` for the reasoning behind each size-affecting choice (why slim over alpine, why CPU-only torch wheels, why Streamlit and dev tooling are never in this image at all).
+
 ## Authentication
 
 Every endpoint except `/api/auth/register` and `/api/auth/login` requires a `Bearer` access token.

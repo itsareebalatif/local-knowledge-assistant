@@ -100,6 +100,36 @@ async def test_retrieve_and_verify_skips_reranking_when_no_reranker_given(
     assert outcome.status == "grounded"
 
 
+async def test_retrieve_and_verify_widens_top_k_for_a_broad_enumerative_query(
+    db_session, make_chunk, fake_embedder, fake_vector_store, user
+):
+    # Regression for a real, diagnosed-live gap: a "list every X" question
+    # needs recall across every matching chunk, not just the top handful by
+    # relevance — a detail that would've ranked 7th under the default top-k
+    # of 5 never reached the LLM at all, not because it scored badly but
+    # because it never made it into the candidate pool in the first place.
+    # 8 real chunks, found only via BM25 (not added to the vector store), so
+    # this isolates the top-k widening itself, not fusion/MMR interactions.
+    chunks = [make_chunk(f"Fact number {i} about the zephyrion project.") for i in range(8)]
+    graph_builder = CooccurrenceGraphBuilder()
+    extractor = SpacyEntityExtractor()
+
+    narrow = await retrieve_and_verify(
+        db_session, fake_embedder, fake_vector_store, graph_builder, extractor,
+        "What is the zephyrion project?", user.user_id,
+    )
+    broad = await retrieve_and_verify(
+        db_session, fake_embedder, fake_vector_store, graph_builder, extractor,
+        "List every fact about the zephyrion project.", user.user_id,
+    )
+
+    assert narrow.status == "grounded"
+    assert broad.status == "grounded"
+    assert len(narrow.candidates) <= 5  # the ordinary default top-k
+    assert len(broad.candidates) > 5  # widened — should surface more of the 8 real chunks
+    assert {c.chunk_id for c in chunks} >= {c.chunk_id for c in broad.candidates}
+
+
 async def test_retrieve_and_verify_never_crosses_users(db_session, make_chunk, fake_embedder, fake_vector_store, user):
     from app.models import User
 

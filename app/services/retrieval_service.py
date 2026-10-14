@@ -14,6 +14,7 @@ from app.graph.graph_expansion import expand_via_graph
 from app.observability import observe, update
 from app.search.bm25_search import bm25_search
 from app.search.grounding_gate import evaluate_context_sufficiency
+from app.search.keyword_utils import is_broad_query
 from app.search.mmr import mmr_select
 from app.search.reranker import Reranker
 from app.search.rrf_fusion import reciprocal_rank_fusion
@@ -70,21 +71,37 @@ async def retrieve_and_verify(
 ) -> RetrievalOutcome:
     settings = get_settings()
 
+    # A "list every X" question needs recall, not just the single best
+    # match — widen every top-k in the pipeline for this one query instead
+    # of changing the defaults that narrow questions rely on.
+    broad = is_broad_query(query)
+    multiplier = settings.broad_query_top_k_multiplier if broad else 1
+    bm25_top_k = settings.bm25_top_k * multiplier
+    vector_top_k = settings.vector_top_k * multiplier
+    graph_top_k = settings.graph_top_k * multiplier
+    rrf_top_n = settings.rrf_top_n * multiplier
+    mmr_top_k = settings.mmr_top_k * multiplier
+
     # user_id is required on all three sources for per-user data isolation
     bm25_hits, vector_hits, graph_hits = await asyncio.gather(
-        _traced_bm25(db, query, settings.bm25_top_k, user_id),
-        _traced_vector(db, embedder, vector_store, query, settings.vector_top_k, user_id),
-        _traced_graph(db, graph_builder, extractor, query, settings.graph_top_k, user_id),
+        _traced_bm25(db, query, bm25_top_k, user_id),
+        _traced_vector(db, embedder, vector_store, query, vector_top_k, user_id),
+        _traced_graph(db, graph_builder, extractor, query, graph_top_k, user_id),
     )
 
     with observe(
         "rrf-fusion",
-        input={"bm25_count": len(bm25_hits), "vector_count": len(vector_hits), "graph_count": len(graph_hits)},
+        input={
+            "bm25_count": len(bm25_hits),
+            "vector_count": len(vector_hits),
+            "graph_count": len(graph_hits),
+            "broad_query": broad,
+        },
     ) as obs:
         fused = reciprocal_rank_fusion(
             {"bm25": bm25_hits, "vector": vector_hits, "graph": graph_hits},
             k=settings.rrf_k,
-            top_n=settings.rrf_top_n,
+            top_n=rrf_top_n,
         )
         update(obs, output={"fused_count": len(fused), "chunk_ids": _chunk_ids(fused)})
 
@@ -104,7 +121,7 @@ async def retrieve_and_verify(
                 candidate_embeddings = await embedder.embed([c.content for c in fused], input_type="search_document")
                 update(embed_obs, output={"num_embeddings": len(candidate_embeddings)})
 
-            fused = mmr_select(fused, candidate_embeddings, k=settings.mmr_top_k, lambda_param=settings.mmr_lambda)
+            fused = mmr_select(fused, candidate_embeddings, k=mmr_top_k, lambda_param=settings.mmr_lambda)
             update(obs, output={"selected_chunk_ids": _chunk_ids(fused)})
 
     with observe(

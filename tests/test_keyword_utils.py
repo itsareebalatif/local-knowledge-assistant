@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.search.keyword_utils import _simple_stem, significant_terms, term_coverage
+from app.search.keyword_utils import _simple_stem, is_broad_query, significant_terms, term_coverage
 
 
 def test_simple_stem_strips_common_plural_suffixes():
@@ -98,3 +98,33 @@ def test_term_coverage_matches_a_formerly_camel_case_term_against_spaced_text():
     terms = significant_terms("DataFlowDiagram")
     coverage = term_coverage(terms, "4.2 Data Flow Diagram (DFD Level 1)")
     assert coverage == 1.0
+
+
+def test_is_broad_query_recognizes_list_every_and_list_all():
+    assert is_broad_query("List every animal that Harry encounters in both chapters.")
+    assert is_broad_query("List every gift Dudley received on his birthday")
+    assert is_broad_query("List all the ingredients")
+
+
+def test_is_broad_query_recognizes_all_the_plural_phrasing():
+    assert is_broad_query("What are all the ingredients in this recipe?")
+    assert is_broad_query("summarize all documents")
+
+
+def test_is_broad_query_recognizes_every_single_and_each_of_the():
+    assert is_broad_query("What does every single character say about Voldemort?")
+    assert is_broad_query("Tell me about each of the Hogwarts houses")
+
+
+def test_is_broad_query_recognizes_everything_about():
+    assert is_broad_query("Tell me everything about Hagrid")
+
+
+def test_is_broad_query_false_for_ordinary_narrow_questions():
+    # Regression guard for the detector itself: these should NOT trigger the
+    # wider, slower retrieval path — narrow single-fact questions are the
+    # common case and must stay on the default top-k.
+    assert not is_broad_query("Who is Professor McGonagall?")
+    assert not is_broad_query("Where did he get it?")
+    assert not is_broad_query("Tell me about Hagrid")
+    assert not is_broad_query("What was Hagrid wearing?")

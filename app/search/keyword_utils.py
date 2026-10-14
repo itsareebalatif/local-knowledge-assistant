@@ -52,3 +52,20 @@ def term_coverage(terms: list[str], reference_text: str) -> float:
     haystack_words = {_simple_stem(w) for w in _tokenize(reference_text)}
     matched = sum(1 for term in terms if _simple_stem(term) in haystack_words)
     return matched / len(terms)
+
+
+# A narrow question ("who is Hagrid?") only needs the single best-matching
+# chunk; ranked top-k retrieval is built for that. A broad/enumerative
+# question ("list every animal Harry sees") needs every chunk that mentions
+# a relevant fact, and a detail scattered in a chunk that ranks 7th gets cut
+# by a top-k of 5 even though it's genuinely relevant, not noise. Confirmed
+# live: the real failure wasn't retrieval ranking the right chunk low, it
+# just never made it into the fixed-size candidate pool at all.
+_BROAD_QUERY_PATTERN = re.compile(
+    r"\b(list\s+(every|all)|all\s+(of\s+)?(the\s+)?\w+s\b|every\s+single|each\s+(one\s+)?of\s+the|everything\s+(about|that))",
+    re.IGNORECASE,
+)
+
+
+def is_broad_query(query: str) -> bool:
+    return bool(_BROAD_QUERY_PATTERN.search(query))
