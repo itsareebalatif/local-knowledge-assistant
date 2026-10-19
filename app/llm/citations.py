@@ -10,7 +10,12 @@ from app.models import Document
 from app.search.types import CandidateChunk
 
 _SNIPPET_LENGTH = 200
-_MARKER_PATTERN = re.compile(r"\[(\d+)\]")
+# ASCII [n] (what the prompt asks for) or 【n】 full-width brackets — a real,
+# confirmed-live quirk from an OpenRouter model: it cited correctly but
+# wrote the marker as 【1】 instead of [1], which the plain-ASCII pattern
+# never matched, so every real citation got silently filtered out by the
+# exact guardrail below (only show markers actually present in the answer).
+_MARKER_PATTERN = re.compile(r"[\[【](\d+)[\]】]")
 
 
 @dataclass

@@ -29,14 +29,23 @@ def _chunk_ids(candidates: list[CandidateChunk]) -> list[int]:
     return [c.chunk_id for c in candidates]
 
 
-async def _traced_bm25(db: Session, query: str, top_k: int, user_id: int) -> list[CandidateChunk]:
+# Each of these three is its own LangGraph node (app.llm.orchestration) as
+# well as a plain function called from here — the graph fans out to all
+# three in parallel and fans back in to fuse_and_verify below, which gives
+# each source its own retry policy and its own span as a distinct graph
+# step, not just a trace nested inside one "retrieve" span. retrieve_and_verify
+# below calls the exact same functions sequentially-gathered, so the CLI and
+# any direct caller that isn't going through the graph see identical behavior.
+
+
+async def run_bm25_search(db: Session, query: str, top_k: int, user_id: int) -> list[CandidateChunk]:
     with observe("bm25-search", as_type="retriever", input={"query": query}) as obs:
         hits = await asyncio.to_thread(bm25_search, db, query, top_k, user_id)
         update(obs, output={"num_hits": len(hits), "chunk_ids": _chunk_ids(hits)})
         return hits
 
 
-async def _traced_vector(
+async def run_vector_search(
     db: Session, embedder: EmbedderBackend, vector_store: VectorStore, query: str, top_k: int, user_id: int
 ) -> list[CandidateChunk]:
     with observe("vector-search", as_type="retriever", input={"query": query}) as obs:
@@ -45,7 +54,7 @@ async def _traced_vector(
         return hits
 
 
-async def _traced_graph(
+async def run_graph_search(
     db: Session,
     graph_builder: CooccurrenceGraphBuilder,
     extractor: SpacyEntityExtractor,
@@ -59,35 +68,38 @@ async def _traced_graph(
         return hits
 
 
-async def retrieve_and_verify(
-    db: Session,
-    embedder: EmbedderBackend,
-    vector_store: VectorStore,
-    graph_builder: CooccurrenceGraphBuilder,
-    extractor: SpacyEntityExtractor,
+def source_top_k(query: str) -> tuple[int, int, int, int, int]:
+    """(bm25, vector, graph, rrf_top_n, mmr_top_k) top-k values for `query`,
+    widened together for a "list every X" question. Pulled out so the three
+    parallel search nodes and fuse_and_verify can each compute the same
+    widened numbers independently, without a dedicated graph node just to
+    share this one flag between them."""
+    settings = get_settings()
+    multiplier = settings.broad_query_top_k_multiplier if is_broad_query(query) else 1
+    return (
+        settings.bm25_top_k * multiplier,
+        settings.vector_top_k * multiplier,
+        settings.graph_top_k * multiplier,
+        settings.rrf_top_n * multiplier,
+        settings.mmr_top_k * multiplier,
+    )
+
+
+async def fuse_and_verify(
     query: str,
-    user_id: int,
+    bm25_hits: list[CandidateChunk],
+    vector_hits: list[CandidateChunk],
+    graph_hits: list[CandidateChunk],
+    embedder: EmbedderBackend,
     reranker: Reranker | None = None,
 ) -> RetrievalOutcome:
+    """The fan-in half of retrieval: fuse three already-retrieved candidate
+    lists (RRF), rerank, diversify (MMR), and gate on sufficiency. Split out
+    from retrieve_and_verify so it can be its own graph node downstream of
+    three parallel search nodes, rather than only reachable after an
+    internal asyncio.gather."""
     settings = get_settings()
-
-    # A "list every X" question needs recall, not just the single best
-    # match — widen every top-k in the pipeline for this one query instead
-    # of changing the defaults that narrow questions rely on.
-    broad = is_broad_query(query)
-    multiplier = settings.broad_query_top_k_multiplier if broad else 1
-    bm25_top_k = settings.bm25_top_k * multiplier
-    vector_top_k = settings.vector_top_k * multiplier
-    graph_top_k = settings.graph_top_k * multiplier
-    rrf_top_n = settings.rrf_top_n * multiplier
-    mmr_top_k = settings.mmr_top_k * multiplier
-
-    # user_id is required on all three sources for per-user data isolation
-    bm25_hits, vector_hits, graph_hits = await asyncio.gather(
-        _traced_bm25(db, query, bm25_top_k, user_id),
-        _traced_vector(db, embedder, vector_store, query, vector_top_k, user_id),
-        _traced_graph(db, graph_builder, extractor, query, graph_top_k, user_id),
-    )
+    _, _, _, rrf_top_n, mmr_top_k = source_top_k(query)
 
     with observe(
         "rrf-fusion",
@@ -95,7 +107,7 @@ async def retrieve_and_verify(
             "bm25_count": len(bm25_hits),
             "vector_count": len(vector_hits),
             "graph_count": len(graph_hits),
-            "broad_query": broad,
+            "broad_query": is_broad_query(query),
         },
     ) as obs:
         fused = reciprocal_rank_fusion(
@@ -138,3 +150,27 @@ async def retrieve_and_verify(
     return RetrievalOutcome(
         query=query, status="grounded", candidates=verdict.passing_candidates, reason="ok", metrics=verdict.metrics
     )
+
+
+async def retrieve_and_verify(
+    db: Session,
+    embedder: EmbedderBackend,
+    vector_store: VectorStore,
+    graph_builder: CooccurrenceGraphBuilder,
+    extractor: SpacyEntityExtractor,
+    query: str,
+    user_id: int,
+    reranker: Reranker | None = None,
+) -> RetrievalOutcome:
+    """The non-graph entry point (CLI, direct tests): gathers the same three
+    searches concurrently rather than as separate graph nodes, then fuses
+    them exactly as app.llm.orchestration's fan-in node does."""
+    bm25_top_k, vector_top_k, graph_top_k, _, _ = source_top_k(query)
+
+    # user_id is required on all three sources for per-user data isolation
+    bm25_hits, vector_hits, graph_hits = await asyncio.gather(
+        run_bm25_search(db, query, bm25_top_k, user_id),
+        run_vector_search(db, embedder, vector_store, query, vector_top_k, user_id),
+        run_graph_search(db, graph_builder, extractor, query, graph_top_k, user_id),
+    )
+    return await fuse_and_verify(query, bm25_hits, vector_hits, graph_hits, embedder, reranker)

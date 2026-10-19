@@ -6,6 +6,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from app.api.auth_routes import router as auth_router
 from app.api.chunk_routes import router as chunk_router
@@ -20,6 +22,7 @@ from app.embeddings.vector_store import ChromaVectorStore
 from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.llm import get_llm_backend
+from app.llm.orchestration import build_rag_graph
 from app.notifications.resend_client import ResendEmailSender
 from app.observability import get_langfuse
 from app.search.reranker import CrossEncoderReranker
@@ -33,9 +36,34 @@ async def lifespan(app: FastAPI):
     app.state.graph_builder = CooccurrenceGraphBuilder.load(settings.graph_store_path)
     app.state.extractor = SpacyEntityExtractor()
     app.state.llm = get_llm_backend()
+    # Primary first, then each configured fallback (skipping the primary's
+    # own name if it's listed again) — app.llm.orchestration tries these in
+    # order within a single answer attempt, only advancing past one that
+    # fails before producing any visible output.
+    fallback_names = [n.strip() for n in settings.llm_fallback_backends.split(",") if n.strip()]
+    app.state.llm_chain = [app.state.llm] + [
+        get_llm_backend(name) for name in fallback_names if name != settings.llm_backend
+    ]
     app.state.reranker = CrossEncoderReranker() if settings.rerank_enabled else None
     app.state.email_sender = ResendEmailSender()
-    yield
+
+    # Opened for the server's whole lifetime, closed on shutdown below —
+    # this is what lets graph.aget_state_history(thread_id=conversation_id)
+    # replay a past conversation's routing/retrieval/generation steps after
+    # the fact, not just while Langfuse is watching it live. The store is
+    # separate from the checkpointer: it's cross-thread (shared by every
+    # conversation, not scoped to one), which is what the circuit breaker
+    # in app.llm.orchestration needs — "is this backend down" isn't a fact
+    # about any single conversation.
+    async with (
+        AsyncSqliteSaver.from_conn_string(settings.langgraph_checkpoint_path) as checkpointer,
+        AsyncSqliteStore.from_conn_string(settings.langgraph_store_path) as store,
+    ):
+        await checkpointer.setup()
+        await store.setup()
+        app.state.rag_graph = build_rag_graph(checkpointer=checkpointer, store=store)
+        yield
+
     langfuse = get_langfuse()
     if langfuse is not None:
         langfuse.shutdown()

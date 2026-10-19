@@ -27,8 +27,14 @@ def _groq() -> OpenAICompatibleLLM:
         send_seed=True,
         # openai/gpt-oss-20b is a reasoning model — see
         # OpenAICompatibleLLM.generate_stream for why this headroom and the
-        # exhaustion check below both matter for it specifically.
-        max_completion_tokens=2048,
+        # exhaustion check below both matter for it specifically. Raised
+        # from 2048 after a real live failure: a plain question ("who is
+        # X?") burned the full 2048 on the hidden reasoning pass alone and
+        # never reached visible content (finish_reason="length", zero
+        # content). This account's available Groq models are all
+        # reasoning models (gpt-oss-20b/120b) — there's no plain
+        # non-reasoning chat model to switch to instead.
+        max_completion_tokens=6144,
         detect_reasoning_exhaustion=True,
     )
 
@@ -61,6 +67,26 @@ def _openai() -> OpenAICompatibleLLM:
     )
 
 
+def _openrouter() -> OpenAICompatibleLLM:
+    s = get_settings()
+    return OpenAICompatibleLLM(
+        api_key=s.openrouter_api_key,
+        base_url=s.openrouter_base_url,
+        model=s.openrouter_model,
+        timeout=s.openrouter_timeout_seconds,
+        provider_name="OpenRouter",
+        api_key_env_var="OPENROUTER_API_KEY",
+        send_seed=True,
+        # The default model (nvidia/nemotron-3-ultra-550b-a55b:free) accepts
+        # reasoning/reasoning_effort params — it's a reasoning model, same
+        # risk category as Groq's gpt-oss-20b (see _groq() above): it can
+        # burn its whole completion budget on hidden reasoning and return
+        # no visible content. Same headroom + detection applied here.
+        max_completion_tokens=6144,
+        detect_reasoning_exhaustion=True,
+    )
+
+
 # Every cloud entry here is the same OpenAICompatibleLLM implementation with
 # different settings — adding a new OpenAI-compatible provider (Together,
 # Fireworks, a self-hosted vLLM server, etc.) means adding one factory
@@ -73,6 +99,7 @@ _PROVIDERS: dict[str, Callable[[], LLMBackend]] = {
     "groq": _groq,
     "gemini": _gemini,
     "openai": _openai,
+    "openrouter": _openrouter,
 }
 
 

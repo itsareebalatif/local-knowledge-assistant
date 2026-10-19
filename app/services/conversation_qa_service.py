@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from app.config import get_settings
 from app.llm.base import LLMBackend, LLMError
+from app.llm.prompts import append_user_facts
 from app.models import Message
 
 logger = logging.getLogger(__name__)
@@ -76,11 +77,14 @@ def _build_prompt(history: list[Message], query: str) -> str:
     return f"Conversation transcript:\n{transcript}\n\nCurrent question: {query}\n\nAnswer:"
 
 
-async def answer_from_history_stream(llm: LLMBackend, history: list[Message], query: str) -> AsyncIterator[dict]:
+async def answer_from_history_stream(
+    llm: LLMBackend, history: list[Message], query: str, user_facts: list[str] | None = None
+) -> AsyncIterator[dict]:
     prompt = _build_prompt(history, query)
+    system_prompt = append_user_facts(build_system_prompt(), user_facts)
     answer_parts: list[str] = []
     try:
-        async for piece in llm.generate_stream(build_system_prompt(), prompt):
+        async for piece in llm.generate_stream(system_prompt, prompt):
             answer_parts.append(piece)
             yield {"type": "token", "text": piece}
     except LLMError as exc:

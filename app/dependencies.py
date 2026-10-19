@@ -14,6 +14,7 @@ from app.embeddings.vector_store import VectorStore
 from app.graph.entity_extractor import SpacyEntityExtractor
 from app.graph.graph_builder import CooccurrenceGraphBuilder
 from app.llm.base import LLMBackend
+from app.llm.orchestration import get_fallback_rag_graph
 from app.models import User
 from app.notifications.resend_client import EmailSender
 from app.search.reranker import Reranker
@@ -26,6 +27,8 @@ __all__ = [
     "get_entity_extractor",
     "get_graph_builder",
     "get_llm",
+    "get_llm_chain",
+    "get_rag_graph",
     "get_reranker",
     "get_session_factory",
     "get_vector_store",
@@ -60,8 +63,26 @@ def get_llm(request: Request) -> LLMBackend:
     return request.app.state.llm
 
 
+def get_llm_chain(request: Request, llm: LLMBackend = Depends(get_llm)) -> list[LLMBackend]:
+    # Depends on get_llm (not app.state.llm directly) so a test/caller that
+    # overrides get_llm with a fake automatically becomes this chain's first
+    # entry too — only the configured fallbacks behind it (if any) come from
+    # app.state, built once at startup in app.main's lifespan.
+    configured_fallbacks = getattr(request.app.state, "llm_chain", None)
+    return [llm, *configured_fallbacks[1:]] if configured_fallbacks else [llm]
+
+
 def get_reranker(request: Request) -> Reranker | None:
     return request.app.state.reranker
+
+
+def get_rag_graph(request: Request):
+    # Falls back to an unpersisted graph (same nodes/edges, no checkpointer)
+    # for any caller that never ran app.main's lifespan — tests chief among
+    # them, which instantiate TestClient without triggering startup. Real
+    # traffic always gets the real, checkpointed graph built there.
+    graph = getattr(request.app.state, "rag_graph", None)
+    return graph if graph is not None else get_fallback_rag_graph()
 
 
 def get_email_sender(request: Request) -> EmailSender:

@@ -40,6 +40,26 @@ async def test_grounded_outcome_streams_tokens_then_final_event(db_session, make
     assert "don't know" in system_prompt.lower()
 
 
+async def test_empty_llm_answer_is_refused_not_reported_as_fully_grounded(db_session, make_chunk, fake_llm):
+    # Regression for a real, confirmed-live bug: a model (observed with a
+    # reasoning model over OpenRouter) streamed zero real content and still
+    # finished without raising LLMError. verify_grounding("", ...) treats
+    # "no sentences to check" as vacuously 100% grounded, and the old
+    # refusal check (`if verification.sentences and ...`) never fired for
+    # an empty answer (`sentences == []` is falsy) — so the user saw
+    # "Grounding coverage: 100%" next to a blank answer. Must refuse
+    # instead, before grounding verification ever runs.
+    chunk = make_chunk("Ollama runs language models locally on your machine.")
+    candidate = CandidateChunk(chunk_id=chunk.chunk_id, doc_id=chunk.doc_id, content=chunk.content, score=1.0)
+    outcome = RetrievalOutcome(query="what does Ollama do?", status="grounded", candidates=[candidate])
+    fake_llm.pieces = ["   ", ""]  # whitespace-only streamed pieces, same as a genuinely empty answer
+
+    events = [e async for e in generate_answer_stream(db_session, fake_llm, outcome)]
+
+    assert events[-1] == {"type": "refused", "reason": "empty_answer", "metrics": {}}
+    assert not any(e["type"] == "done" for e in events)
+
+
 async def test_llm_error_yields_error_event_not_exception(db_session, make_chunk):
     class FailingLLM:
         model = "fake-failing-llm"

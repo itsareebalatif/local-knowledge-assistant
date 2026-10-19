@@ -275,7 +275,7 @@ def test_factory_picks_groq_configured_as_a_reasoning_model_with_token_headroom(
     assert isinstance(llm, OpenAICompatibleLLM)
     assert llm.provider_name == "Groq"
     assert llm.send_seed is True
-    assert llm.max_completion_tokens == 2048
+    assert llm.max_completion_tokens == 6144
     assert llm.detect_reasoning_exhaustion is True
 
 

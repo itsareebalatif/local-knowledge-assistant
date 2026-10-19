@@ -134,6 +134,14 @@ def render_reset_password_page(token: str) -> None:
             unsafe_allow_html=True,
         )
 
+        # The `?token=` query param stays in the URL across reloads, which
+        # means without this, there's no way back to the login form once
+        # you've landed here — including after the token's already expired
+        # or been used, which otherwise traps you on this screen for good.
+        if st.button("← Back to login", use_container_width=True):
+            st.query_params.clear()
+            st.rerun()
+
         with st.form("reset_password_form"):
             new_password = st.text_input("New password (8+ characters)", type="password")
             confirm_password = st.text_input("Confirm new password", type="password")

@@ -58,6 +58,25 @@ def build_system_prompt(assistant_name: str | None = None, citation_marker_style
 SYSTEM_PROMPT = build_system_prompt()
 
 
+def append_user_facts(system_prompt: str, user_facts: list[str] | None) -> str:
+    """Appends durable facts the user has asked to be remembered (see
+    app.llm.orchestration's "remember ..." extraction, stored cross-
+    conversation in the LangGraph Store) to an already-built system prompt.
+    Shared by both answer paths (document Q&A and conversation-memory Q&A)
+    so a fact like "always keep answers short" applies to either one."""
+    if not user_facts:
+        return system_prompt
+    facts_block = "\n".join(f"- {fact}" for fact in user_facts)
+    return (
+        f"{system_prompt}\n\n"
+        "KNOWN FACTS ABOUT THIS USER\n"
+        "The user has asked you to remember these across conversations. Apply them where "
+        "relevant to how you answer, but don't force them into an answer they don't fit, "
+        "and never treat them as something the current documents or conversation said:\n"
+        f"{facts_block}"
+    )
+
+
 def build_user_prompt(query: str, candidates: list[CandidateChunk]) -> tuple[str, dict[int, int]]:
     # Chunk numbering here must match app/llm/citations.py's marker numbering.
     marker_by_chunk_id = {c.chunk_id: i + 1 for i, c in enumerate(candidates)}

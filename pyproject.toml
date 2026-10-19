@@ -2,7 +2,11 @@
 name = "personal-knowledge-engine"
 version = "0.1.0"
 description = "Local, privacy-first AI knowledge assistant (hybrid RAG + lightweight knowledge graph)."
-requires-python = ">=3.10"
+# LangGraph's per-node stream writer (app/llm/rag_graph.py) relies on
+# contextvar propagation across async nodes, which is unreliable before
+# Python 3.11 — confirmed live: on 3.10 it raises "Called get_config outside
+# of a runnable context" from inside an async node. CI already runs 3.11.
+requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0,<3.0",
     "pydantic>=2.6,<3.0",
@@ -27,6 +31,15 @@ dependencies = [
     "email-validator>=2.1,<3.0",
     "langfuse>=4.0,<5.0",
     "certifi>=2024.0.0",
+    # langgraph-rag branch only: re-expresses the query-answering pipeline's
+    # orchestration (route -> retrieve -> guardrail -> generate -> guardrail)
+    # as a LangGraph graph, see app/llm/rag_graph.py. Not used anywhere else.
+    "langgraph>=1.0,<2.0",
+    # Persists each conversation's graph execution state to disk, keyed by
+    # thread_id (= conversation_id) — see app/main.py's lifespan and
+    # app/llm/orchestration.py. Lets a trace be replayed/inspected after the
+    # fact (graph.aget_state_history), not just watched live in Langfuse.
+    "langgraph-checkpoint-sqlite>=3.0,<4.0",
     # Pinned to the exact line chromadb's own otel extras want — a plain
     # `pip install langfuse` pulls newer opentelemetry-sdk/-api/-proto/
     # -semantic-conventions than chromadb[otlp-proto-grpc,instrumentation-
@@ -72,6 +85,14 @@ dev = [
 streamlit = [
     "streamlit>=1.38,<2.0",
     "requests>=2.31,<3.0",
+    # spacy/thinc (the entity-extraction stack) are compiled against
+    # numpy<2.0 and crash on import otherwise — confirmed live: pyarrow>=19
+    # requires numpy>=2.0 at its own C-extension import time, which pip
+    # doesn't flag as a conflict (pyarrow's numpy floor isn't a declared
+    # metadata constraint, just an ImportError at runtime), so a plain
+    # `pip install streamlit` silently pulls a pyarrow that breaks
+    # st.write_stream() the moment it's called. Pinned below that floor.
+    "pyarrow<19",
 ]
 
 [build-system]

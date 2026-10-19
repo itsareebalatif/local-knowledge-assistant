@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # --- Graph store ---
     graph_store_path: str = str(BASE_DIR / "data" / "graph.gpickle")
 
+    # --- LangGraph checkpoint store (separate file from the app's own DB —
+    # this is the RAG graph's own execution-state history, not application
+    # data; keeping it apart means it can be wiped/rebuilt without touching
+    # conversations, documents, or users) ---
+    langgraph_checkpoint_path: str = str(BASE_DIR / "data" / "langgraph_checkpoints.sqlite3")
+    # Cross-thread (not per-conversation) store — the circuit breaker's
+    # backend health records live here, since "is Groq currently down"
+    # isn't scoped to any one conversation.
+    langgraph_store_path: str = str(BASE_DIR / "data" / "langgraph_store.sqlite3")
+
     # --- Local LLM (Ollama) ---
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b"
@@ -54,6 +64,12 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = 60.0
 
+    # --- Optional cloud LLM: OpenRouter (OpenAI-compatible endpoint) ---
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    openrouter_timeout_seconds: float = 60.0
+
     # --- Generation (Pipeline 2) ---
     # To switch providers or models: change this value and the matching
     # *_model setting above (e.g. GROQ_MODEL, OPENAI_MODEL) — never code.
@@ -67,6 +83,26 @@ class Settings(BaseSettings):
     # judging, Groq or local Ollama for real user queries. Defaults to
     # whatever LLM_BACKEND already is, so leaving this unset changes nothing.
     eval_llm_backend: str | None = None
+    # Comma-separated backend names (e.g. "groq,openai") tried in order, after
+    # the primary LLM_BACKEND, when a generation attempt fails before
+    # producing any visible output — confirmed live: OpenRouter's free tier
+    # can go completely unresponsive (0 bytes after 90s on a trivial prompt)
+    # with no error status to react to except a timeout, which previously
+    # meant manually editing .env and restarting the server mid-incident.
+    # Empty = no automatic fallback, same as before this existed.
+    llm_fallback_backends: str = ""
+    # Circuit breaker for the fallback chain (app.llm.orchestration): once a
+    # backend has failed this many times in a row, every request skips
+    # straight past it to the next one in the chain — without even trying
+    # it — for this many seconds, instead of every single request paying
+    # that backend's full timeout first. Confirmed live: OpenRouter's free
+    # tier went fully unresponsive (0 bytes after 90s) for an extended
+    # window; without this, every request during that window would have
+    # stalled on it before reaching Groq. Tracked in the LangGraph Store
+    # (cross-conversation, unlike the checkpointer's per-thread state) so
+    # the whole app shares one view of which backend is currently bad.
+    circuit_breaker_failure_threshold: int = 3
+    circuit_breaker_cooldown_seconds: float = 120.0
     llm_temperature: float = 0.0
     llm_seed: int = 42
     min_sentence_grounding_coverage: float = 0.3
@@ -78,6 +114,14 @@ class Settings(BaseSettings):
     # (nothing to classify against), so this only adds latency/cost on
     # genuine follow-ups.
     smart_routing_enabled: bool = True
+
+    # --- Self-correcting generation ---
+    # After an answer comes back fully ungrounded, empty, or only partially
+    # supported by its sources, the graph retries generation once (or more)
+    # with an added instruction before giving up and showing that answer
+    # as-is. 0 disables this and keeps the original one-shot behavior.
+    max_regeneration_attempts: int = 1
+    min_regeneration_coverage: float = 0.5
 
     # --- System prompt persona (threaded through every LLM-facing prompt) ---
     # Pure wording — changing these doesn't touch retrieval, citation

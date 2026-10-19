@@ -55,3 +55,18 @@ def test_build_citations_excludes_candidates_the_answer_never_cited(db_session, 
     partial_citations = build_citations(db_session, candidates, "Only the first fact is relevant [1].")
     assert [c.marker for c in partial_citations] == [1]
     assert partial_citations[0].chunk_id == chunk_a.chunk_id
+
+
+def test_build_citations_recognizes_full_width_bracket_markers(db_session, make_chunk):
+    # Regression for a real, confirmed-live bug: an OpenRouter model cited
+    # correctly but wrote the marker as 【 1 】 (full-width brackets)
+    # instead of the prompted ASCII [1] — the plain-ASCII pattern never
+    # matched it, so a genuinely correct, well-cited answer showed zero
+    # sources at all.
+    chunk = make_chunk("Sylvia sells herbal cures without Rory's knowledge.")
+    candidate = CandidateChunk(chunk_id=chunk.chunk_id, doc_id=chunk.doc_id, content=chunk.content, score=1.0)
+
+    citations = build_citations(db_session, [candidate], "Sylvia runs a secret side business 【1】.")
+
+    assert [c.marker for c in citations] == [1]
+    assert citations[0].chunk_id == chunk.chunk_id
