@@ -59,11 +59,7 @@ SYSTEM_PROMPT = build_system_prompt()
 
 
 def append_user_facts(system_prompt: str, user_facts: list[str] | None) -> str:
-    """Appends durable facts the user has asked to be remembered (see
-    app.llm.orchestration's "remember ..." extraction, stored cross-
-    conversation in the LangGraph Store) to an already-built system prompt.
-    Shared by both answer paths (document Q&A and conversation-memory Q&A)
-    so a fact like "always keep answers short" applies to either one."""
+
     if not user_facts:
         return system_prompt
     facts_block = "\n".join(f"- {fact}" for fact in user_facts)

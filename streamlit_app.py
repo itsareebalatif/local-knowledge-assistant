@@ -507,9 +507,19 @@ def render_chat() -> None:
         st.markdown(question)
 
     with st.chat_message("assistant"):
+        # In a placeholder, not written directly: the pipeline can only
+        # judge an answer grounded/refused AFTER the full thing has
+        # streamed, so what's live-streamed here can be a draft the
+        # grounding check then rejects (confirmed live: the model wrote its
+        # own "[1][2][3][4][5]" markers into a draft answer it then
+        # correctly refused for) — without a placeholder, that rejected
+        # draft stayed on screen with the clean refusal message stacked
+        # right under it, so the user saw both at once.
+        stream_placeholder = st.empty()
         try:
             generator, final_event = stream_answer(question)
-            full_text = st.write_stream(generator)
+            with stream_placeholder:
+                full_text = st.write_stream(generator)
         except requests.RequestException as exc:
             st.error(f"Could not reach the API: {exc}")
             return
@@ -523,10 +533,12 @@ def render_chat() -> None:
         st.session_state.conversation_id = final_event.get("conversation_id")
 
         if event_type == "refused":
+            stream_placeholder.empty()  # the streamed draft was rejected — don't leave it on screen
             message = _refusal_message(final_event.get("reason"))
             st.markdown(message)
             st.session_state.messages.append({"role": "assistant", "content": message})
         elif event_type == "error":
+            stream_placeholder.empty()
             st.error(final_event.get("message", "Unknown error."))
             st.session_state.messages.append({"role": "assistant", "content": "*(error during generation)*"})
         else:
